@@ -27,5 +27,6 @@ public/
 
 - Build command: `exit 0`
 - Build output directory: `public`
+- 安全响应头: `public/_headers`
 
 详细说明见 [DEPLOY.md](./DEPLOY.md)。
