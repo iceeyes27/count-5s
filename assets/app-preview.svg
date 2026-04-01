@@ -1,0 +1,59 @@
+<svg width="860" height="1800" viewBox="0 0 860 1800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="120" y1="80" x2="730" y2="1700" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F6EFE1"/>
+      <stop offset="1" stop-color="#DCC2A7"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="120" y1="180" x2="700" y2="1520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF9EF" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#F6EBDD" stop-opacity="0.94"/>
+    </linearGradient>
+    <linearGradient id="primary" x1="270" y1="970" x2="420" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C55C3D"/>
+      <stop offset="1" stop-color="#893B26"/>
+    </linearGradient>
+    <filter id="shadow" x="36" y="118" width="788" height="1570" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="28"/>
+      <feGaussianBlur stdDeviation="22"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.282353 0 0 0 0 0.160784 0 0 0 0 0.113725 0 0 0 0.18 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+  </defs>
+  <rect width="860" height="1800" rx="120" fill="url(#bg)"/>
+  <circle cx="180" cy="1540" r="170" fill="#C55C3D" fill-opacity="0.10"/>
+  <circle cx="730" cy="180" r="150" fill="white" fill-opacity="0.36"/>
+  <g filter="url(#shadow)">
+    <rect x="80" y="160" width="700" height="1480" rx="48" fill="url(#panel)"/>
+    <text x="140" y="245" fill="#893B26" font-size="30" font-family="Trebuchet MS, Segoe UI, sans-serif" letter-spacing="7">KEGEL TIMER</text>
+    <text x="140" y="330" fill="#2F241F" font-size="68" font-weight="700" font-family="Georgia, Times New Roman, serif">凯格尔运动计时器</text>
+    <text x="140" y="415" fill="#6A554B" font-size="40" font-family="Trebuchet MS, Segoe UI, sans-serif">5 秒收紧，5 秒停留，自动循环，并记录完成轮次。</text>
+    <rect x="140" y="500" width="580" height="470" rx="42" fill="#FBF5EE" stroke="#E7D5C5" stroke-width="3"/>
+    <text x="430" y="608" text-anchor="middle" fill="#6A554B" font-size="38" font-family="Trebuchet MS, Segoe UI, sans-serif">当前阶段</text>
+    <text x="430" y="715" text-anchor="middle" fill="#2F241F" font-size="72" font-weight="700" font-family="Georgia, Times New Roman, serif">准备开始</text>
+    <text x="430" y="840" text-anchor="middle" fill="#C55C3D" font-size="126" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">5</text>
+    <text x="430" y="915" text-anchor="middle" fill="#6A554B" font-size="36" font-family="Trebuchet MS, Segoe UI, sans-serif">点击开始后进入 5 秒收紧</text>
+    <rect x="140" y="1004" width="178" height="92" rx="46" fill="url(#primary)"/>
+    <rect x="341" y="1004" width="178" height="92" rx="46" fill="white" fill-opacity="0.72"/>
+    <rect x="542" y="1004" width="178" height="92" rx="46" fill="white" fill-opacity="0.72"/>
+    <text x="229" y="1062" text-anchor="middle" fill="#FFF8F1" font-size="34" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">开始</text>
+    <text x="430" y="1062" text-anchor="middle" fill="#2F241F" font-size="34" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">暂停</text>
+    <text x="631" y="1062" text-anchor="middle" fill="#2F241F" font-size="34" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">重置</text>
+    <rect x="140" y="1132" width="280" height="184" rx="32" fill="white" fill-opacity="0.58" stroke="#E7D5C5" stroke-width="3"/>
+    <rect x="440" y="1132" width="280" height="184" rx="32" fill="white" fill-opacity="0.58" stroke="#E7D5C5" stroke-width="3"/>
+    <text x="178" y="1198" fill="#6A554B" font-size="30" font-family="Trebuchet MS, Segoe UI, sans-serif">已完成轮次</text>
+    <text x="478" y="1198" fill="#6A554B" font-size="30" font-family="Trebuchet MS, Segoe UI, sans-serif">总秒数</text>
+    <text x="178" y="1282" fill="#2F241F" font-size="72" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">0</text>
+    <text x="478" y="1282" fill="#2F241F" font-size="72" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">0</text>
+    <rect x="140" y="1356" width="280" height="154" rx="28" fill="white" fill-opacity="0.50" stroke="#E7D5C5" stroke-width="3"/>
+    <rect x="440" y="1356" width="280" height="154" rx="28" fill="#EED2C6" fill-opacity="0.75" stroke="#DDAA95" stroke-width="3"/>
+    <circle cx="196" cy="1420" r="24" fill="#EED2C6"/>
+    <circle cx="496" cy="1420" r="24" fill="#C55C3D" fill-opacity="0.16"/>
+    <text x="196" y="1431" text-anchor="middle" fill="#893B26" font-size="26" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">1</text>
+    <text x="496" y="1431" text-anchor="middle" fill="#893B26" font-size="26" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">2</text>
+    <text x="196" y="1488" text-anchor="middle" fill="#2F241F" font-size="32" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">收紧 5 秒</text>
+    <text x="496" y="1488" text-anchor="middle" fill="#2F241F" font-size="32" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">停留 5 秒</text>
+  </g>
+</svg>
