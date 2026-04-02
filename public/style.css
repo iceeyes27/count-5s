@@ -138,6 +138,102 @@ h1 {
   gap: 14px;
 }
 
+.summary-card {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid var(--line);
+}
+
+.summary-label,
+.summary-note {
+  margin: 0;
+}
+
+.summary-label {
+  color: var(--text-soft);
+  font-size: 0.94rem;
+}
+
+.summary-note {
+  margin-top: 6px;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.sync-note {
+  margin: 6px 0 0;
+  color: var(--accent-deep);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.history-card {
+  margin-top: 16px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid var(--line);
+}
+
+.history-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-label,
+.history-note {
+  margin: 0;
+}
+
+.history-label {
+  color: var(--text-soft);
+  font-size: 0.94rem;
+}
+
+.history-note {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.history-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.history-item,
+.history-empty {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(93, 58, 41, 0.1);
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-date {
+  font-weight: 700;
+}
+
+.history-cycles {
+  color: var(--accent-deep);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.history-empty {
+  color: var(--text-soft);
+}
+
 .stat-box {
   padding: 18px;
   border-radius: 18px;
@@ -155,6 +251,14 @@ h1 {
   display: block;
   margin-top: 8px;
   font-size: 2rem;
+}
+
+.status-box strong,
+#checkInStatus {
+  font-size: clamp(1.45rem, 4.5vw, 1.85rem);
+  line-height: 1.2;
+  word-break: keep-all;
+  overflow-wrap: normal;
 }
 
 button {
@@ -285,6 +389,34 @@ button:disabled {
   button {
     padding: 12px 10px;
     font-size: 0.95rem;
+  }
+
+  .summary-card {
+    margin-top: 14px;
+    padding: 14px;
+  }
+
+  .history-card {
+    margin-top: 14px;
+    padding: 14px;
+  }
+
+  .history-header,
+  .history-item {
+    display: grid;
+    gap: 4px;
+  }
+
+  .history-note {
+    font-size: 0.8rem;
+  }
+
+  .history-cycles {
+    justify-self: start;
+  }
+
+  .sync-note {
+    font-size: 0.8rem;
   }
 
   .stats {
