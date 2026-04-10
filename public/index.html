@@ -12,7 +12,36 @@
     <section class="panel">
       <p class="eyebrow">Kegel Timer</p>
       <h1>凯格尔运动计时器</h1>
-      <p class="description">5 秒收紧，5 秒停留，自动循环，并记录完成轮次。</p>
+      <p class="description" id="modeDescription">普通模式：5 秒收紧，5 秒放松，自动循环，并记录完成轮次。</p>
+
+      <section class="mode-card" aria-label="训练模式">
+        <div class="mode-header">
+          <p class="mode-label">训练模式</p>
+          <p class="mode-note">切换模式会重置当前训练</p>
+        </div>
+        <div class="mode-switch" aria-label="训练模式切换">
+          <button
+            id="normalModeButton"
+            class="mode-button active"
+            type="button"
+            data-mode="normal"
+            aria-pressed="true"
+          >
+            普通
+            <span>5 秒收紧 / 5 秒放松</span>
+          </button>
+          <button
+            id="quickModeButton"
+            class="mode-button"
+            type="button"
+            data-mode="quick"
+            aria-pressed="false"
+          >
+            快速
+            <span>1 秒收紧 / 2 秒放松</span>
+          </button>
+        </div>
+      </section>
 
       <div class="timer-card" aria-live="polite">
         <p class="phase-label">当前阶段</p>
@@ -73,11 +102,11 @@
       <div class="rhythm">
         <div class="rhythm-step active" id="squeezeStep">
           <span>1</span>
-          <p>收紧 5 秒</p>
+          <p id="squeezeStepLabel">收紧 5 秒</p>
         </div>
-        <div class="rhythm-step" id="holdStep">
+        <div class="rhythm-step" id="relaxStep">
           <span>2</span>
-          <p>停留 5 秒</p>
+          <p id="relaxStepLabel">放松 5 秒</p>
         </div>
       </div>
     </section>

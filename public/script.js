@@ -1,24 +1,48 @@
-const PHASES = [
-  {
-    name: "收紧",
-    hint: "收紧骨盆底肌，保持均匀发力",
-    duration: 5
-  },
-  {
-    name: "停留",
-    hint: "维持发力状态，不要憋气",
-    duration: 5
-  }
-];
-
 const API_ENDPOINT = "/api/stats";
 const CACHE_KEY = "kegel-daily-cache";
 const DEVICE_ID_KEY = "kegel-device-id";
 const PENDING_SYNC_KEY = "kegel-pending-sync";
+const MODE_KEY = "kegel-training-mode";
+
+const MODES = {
+  normal: {
+    name: "普通模式",
+    description: "普通模式：5 秒收紧，5 秒放松，自动循环，并记录完成轮次。",
+    phases: [
+      {
+        name: "收紧",
+        hint: "收紧骨盆底肌，保持均匀发力",
+        duration: 5
+      },
+      {
+        name: "放松",
+        hint: "放松骨盆底肌，让肌肉自然恢复",
+        duration: 5
+      }
+    ]
+  },
+  quick: {
+    name: "快速模式",
+    description: "快速模式：1 秒收紧，2 秒放松，自动循环，并记录完成轮次。",
+    phases: [
+      {
+        name: "收紧",
+        hint: "快速收紧骨盆底肌，短促但清晰发力",
+        duration: 1
+      },
+      {
+        name: "放松",
+        hint: "快速放松骨盆底肌，让肌肉完全松开",
+        duration: 2
+      }
+    ]
+  }
+};
 
 const phaseName = document.getElementById("phaseName");
 const countdown = document.getElementById("countdown");
 const phaseHint = document.getElementById("phaseHint");
+const modeDescription = document.getElementById("modeDescription");
 const cycleCount = document.getElementById("cycleCount");
 const elapsedTime = document.getElementById("elapsedTime");
 const dailyCount = document.getElementById("dailyCount");
@@ -31,14 +55,18 @@ const historyList = document.getElementById("historyList");
 const startButton = document.getElementById("startButton");
 const pauseButton = document.getElementById("pauseButton");
 const resetButton = document.getElementById("resetButton");
+const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
+const squeezeStepLabel = document.getElementById("squeezeStepLabel");
+const relaxStepLabel = document.getElementById("relaxStepLabel");
 const squeezeStep = document.getElementById("squeezeStep");
-const holdStep = document.getElementById("holdStep");
+const relaxStep = document.getElementById("relaxStep");
 
 let timerId = null;
 let isRunning = false;
 let hasStarted = false;
+let currentModeKey = loadModeKey();
 let phaseIndex = 0;
-let secondsLeft = PHASES[0].duration;
+let secondsLeft = getCurrentPhases()[0].duration;
 let cycles = 0;
 let elapsed = 0;
 let dailyCache = loadStoredObject(CACHE_KEY);
@@ -101,6 +129,28 @@ function loadDeviceId() {
   const nextDeviceId = createDeviceId();
   window.localStorage.setItem(DEVICE_ID_KEY, nextDeviceId);
   return nextDeviceId;
+}
+
+function loadModeKey() {
+  const stored = window.localStorage.getItem(MODE_KEY);
+  return stored && MODES[stored] ? stored : "normal";
+}
+
+function getCurrentMode() {
+  return MODES[currentModeKey] ?? MODES.normal;
+}
+
+function getCurrentPhases() {
+  return getCurrentMode().phases;
+}
+
+function getStartHint() {
+  const [firstPhase] = getCurrentPhases();
+  return `点击开始后进入 ${firstPhase.duration} 秒${firstPhase.name}`;
+}
+
+function formatPhaseLabel(phase) {
+  return `${phase.name} ${phase.duration} 秒`;
 }
 
 function getCachedCycles(dateKey) {
@@ -217,8 +267,19 @@ function renderHistory() {
 }
 
 function updateRhythm() {
+  const phases = getCurrentPhases();
+  squeezeStepLabel.textContent = formatPhaseLabel(phases[0]);
+  relaxStepLabel.textContent = formatPhaseLabel(phases[1]);
   squeezeStep.classList.toggle("active", phaseIndex === 0);
-  holdStep.classList.toggle("active", phaseIndex === 1);
+  relaxStep.classList.toggle("active", phaseIndex === 1);
+}
+
+function updateModeSwitcher() {
+  modeButtons.forEach((button) => {
+    const isActive = button.dataset.mode === currentModeKey;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
 }
 
 function getSyncMessage() {
@@ -242,12 +303,15 @@ function getSyncMessage() {
 }
 
 function render() {
-  const currentPhase = PHASES[phaseIndex];
+  const currentMode = getCurrentMode();
+  const currentPhase = getCurrentPhases()[phaseIndex];
   const summary = buildSummary();
+
+  modeDescription.textContent = currentMode.description;
 
   if (!hasStarted) {
     phaseName.textContent = "准备开始";
-    phaseHint.textContent = "点击开始后进入 5 秒收紧";
+    phaseHint.textContent = getStartHint();
   } else if (isRunning) {
     phaseName.textContent = currentPhase.name;
     phaseHint.textContent = currentPhase.hint;
@@ -269,6 +333,7 @@ function render() {
   syncStatus.textContent = getSyncMessage();
   renderHistory();
   updateRhythm();
+  updateModeSwitcher();
   startButton.disabled = isRunning;
   pauseButton.disabled = !isRunning;
   startButton.textContent = hasStarted ? "继续" : "开始";
@@ -373,13 +438,15 @@ function addCycleToToday() {
 }
 
 function advancePhase() {
-  if (phaseIndex === PHASES.length - 1) {
+  const phases = getCurrentPhases();
+
+  if (phaseIndex === phases.length - 1) {
     cycles += 1;
     addCycleToToday();
   }
 
-  phaseIndex = (phaseIndex + 1) % PHASES.length;
-  secondsLeft = PHASES[phaseIndex].duration;
+  phaseIndex = (phaseIndex + 1) % phases.length;
+  secondsLeft = phases[phaseIndex].duration;
   render();
 }
 
@@ -426,16 +493,31 @@ function resetTimer() {
   window.clearInterval(timerId);
   timerId = null;
   phaseIndex = 0;
-  secondsLeft = PHASES[0].duration;
+  secondsLeft = getCurrentPhases()[0].duration;
   cycles = 0;
   elapsed = 0;
   hasStarted = false;
   render();
 }
 
+function switchMode(nextModeKey) {
+  if (!MODES[nextModeKey] || nextModeKey === currentModeKey) {
+    return;
+  }
+
+  currentModeKey = nextModeKey;
+  window.localStorage.setItem(MODE_KEY, currentModeKey);
+  resetTimer();
+}
+
 startButton.addEventListener("click", startTimer);
 pauseButton.addEventListener("click", pauseTimer);
 resetButton.addEventListener("click", resetTimer);
+modeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    switchMode(button.dataset.mode);
+  });
+});
 window.addEventListener("online", () => {
   void refreshFromCloudflare();
   void flushAllPendingDates();

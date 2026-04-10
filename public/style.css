@@ -93,6 +93,70 @@ h1 {
   line-height: 1.6;
 }
 
+.mode-card {
+  margin-top: 20px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid var(--line);
+}
+
+.mode-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mode-label,
+.mode-note {
+  margin: 0;
+}
+
+.mode-label {
+  color: var(--text-soft);
+  font-size: 0.94rem;
+}
+
+.mode-note {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.mode-switch {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mode-button {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding: 14px 16px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.mode-button span {
+  font-size: 0.84rem;
+  font-weight: 400;
+  color: var(--text-soft);
+}
+
+.mode-button.active {
+  color: #fff8f1;
+  border-color: rgba(137, 59, 38, 0.18);
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+}
+
+.mode-button.active span {
+  color: rgba(255, 248, 241, 0.86);
+}
+
 .timer-card {
   margin-top: 28px;
   padding: 28px 24px;
@@ -365,6 +429,21 @@ button:disabled {
     margin-top: 16px;
     padding: 20px 16px;
     border-radius: 20px;
+  }
+
+  .mode-card {
+    margin-top: 14px;
+    padding: 14px;
+  }
+
+  .mode-header,
+  .mode-switch {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-header {
+    display: grid;
+    gap: 4px;
   }
 
   #phaseName {
