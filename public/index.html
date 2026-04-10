@@ -12,17 +12,99 @@
     <section class="panel">
       <p class="eyebrow">Kegel Timer</p>
       <h1>凯格尔运动计时器</h1>
-      <p class="description" id="modeDescription">普通模式：5 秒收紧，5 秒放松，自动循环，并记录完成轮次。</p>
+      <p class="description" id="modeDescription">先选择普通模式或快速模式，再开始训练。</p>
+
+      <section class="mode-hero" id="modeHero" aria-label="选择训练模式">
+        <div class="mode-hero-copy">
+          <p class="mode-hero-label">第一步</p>
+          <h2 class="mode-hero-title">先选训练模式</h2>
+          <p class="mode-hero-note" id="modeHeroStatus">选择后开始按钮才会启用</p>
+        </div>
+        <div class="mode-hero-switch" aria-label="训练模式选择">
+          <button
+            class="mode-button mode-button-hero active"
+            type="button"
+            data-mode="normal"
+            aria-pressed="true"
+          >
+            普通模式
+            <span>5 秒收紧 / 5 秒放松</span>
+          </button>
+          <button
+            class="mode-button mode-button-hero"
+            type="button"
+            data-mode="quick"
+            aria-pressed="false"
+          >
+            快速模式
+            <span>1 秒收紧 / 2 秒放松</span>
+          </button>
+        </div>
+      </section>
+
+      <div class="timer-card" aria-live="polite">
+        <div class="training-meta">
+          <span class="mode-badge" id="currentModeBadge">待选模式</span>
+        </div>
+        <p class="phase-label">当前阶段</p>
+        <h2 id="phaseName">准备开始</h2>
+        <div class="countdown" id="countdown">--</div>
+        <p class="subtext" id="phaseHint">点击开始后进入 5 秒收紧</p>
+
+        <div class="controls">
+          <button id="startButton" class="primary" type="button">开始</button>
+          <button id="pauseButton" type="button">暂停</button>
+          <button id="resetButton" type="button">重置</button>
+        </div>
+
+        <section class="pulse-panel" id="pulsePanel" aria-label="快速模式脉冲图" hidden>
+          <div class="pulse-header">
+            <p class="pulse-label">快速模式脉冲图</p>
+            <p class="pulse-note" id="pulseNote">跟着脉冲收紧 1 秒，再放松 2 秒</p>
+          </div>
+          <div class="pulse-meter" id="pulseMeter" data-phase="idle" data-running="false">
+            <div class="pulse-bars" aria-hidden="true">
+              <span class="pulse-bar"></span>
+              <span class="pulse-bar"></span>
+              <span class="pulse-bar"></span>
+              <span class="pulse-bar"></span>
+              <span class="pulse-bar"></span>
+              <span class="pulse-bar"></span>
+              <span class="pulse-bar"></span>
+              <span class="pulse-bar"></span>
+              <span class="pulse-bar"></span>
+            </div>
+            <div class="pulse-core"></div>
+          </div>
+          <div class="pulse-track" aria-hidden="true">
+            <div class="pulse-track-fill" id="pulseTrackFill"></div>
+            <span class="pulse-marker" data-segment="0">收</span>
+            <span class="pulse-marker" data-segment="1">松</span>
+            <span class="pulse-marker" data-segment="2">松</span>
+          </div>
+        </section>
+      </div>
+
+      <div class="rhythm">
+        <div class="rhythm-step active" id="squeezeStep">
+          <span>1</span>
+          <p id="squeezeStepLabel">收紧 5 秒</p>
+        </div>
+        <div class="rhythm-step" id="relaxStep">
+          <span>2</span>
+          <p id="relaxStepLabel">放松 5 秒</p>
+        </div>
+      </div>
 
       <section class="mode-card" aria-label="训练模式">
         <div class="mode-header">
-          <p class="mode-label">训练模式</p>
+          <p class="mode-label">切换模式</p>
           <p class="mode-note">切换模式会重置当前训练</p>
         </div>
         <div class="mode-switch" aria-label="训练模式切换">
           <button
             id="normalModeButton"
-            class="mode-button active"
+            class="mode-button mode-button-compact active"
             type="button"
             data-mode="normal"
             aria-pressed="true"
@@ -32,7 +114,7 @@
           </button>
           <button
             id="quickModeButton"
-            class="mode-button"
+            class="mode-button mode-button-compact"
             type="button"
             data-mode="quick"
             aria-pressed="false"
@@ -42,19 +124,6 @@
           </button>
         </div>
       </section>
-
-      <div class="timer-card" aria-live="polite">
-        <p class="phase-label">当前阶段</p>
-        <h2 id="phaseName">准备开始</h2>
-        <div class="countdown" id="countdown">5</div>
-        <p class="subtext" id="phaseHint">点击开始后进入 5 秒收紧</p>
-      </div>
-
-      <div class="controls">
-        <button id="startButton" class="primary" type="button">开始</button>
-        <button id="pauseButton" type="button">暂停</button>
-        <button id="resetButton" type="button">重置</button>
-      </div>
 
       <div class="stats">
         <article class="stat-box">
@@ -98,17 +167,6 @@
         </div>
         <div class="history-list" id="historyList">还没有打卡记录</div>
       </section>
-
-      <div class="rhythm">
-        <div class="rhythm-step active" id="squeezeStep">
-          <span>1</span>
-          <p id="squeezeStepLabel">收紧 5 秒</p>
-        </div>
-        <div class="rhythm-step" id="relaxStep">
-          <span>2</span>
-          <p id="relaxStepLabel">放松 5 秒</p>
-        </div>
-      </div>
     </section>
   </main>
 

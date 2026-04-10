@@ -3,6 +3,7 @@ const CACHE_KEY = "kegel-daily-cache";
 const DEVICE_ID_KEY = "kegel-device-id";
 const PENDING_SYNC_KEY = "kegel-pending-sync";
 const MODE_KEY = "kegel-training-mode";
+const MODE_PICKED_KEY = "kegel-mode-picked";
 
 const MODES = {
   normal: {
@@ -43,6 +44,9 @@ const phaseName = document.getElementById("phaseName");
 const countdown = document.getElementById("countdown");
 const phaseHint = document.getElementById("phaseHint");
 const modeDescription = document.getElementById("modeDescription");
+const modeHero = document.getElementById("modeHero");
+const modeHeroStatus = document.getElementById("modeHeroStatus");
+const currentModeBadge = document.getElementById("currentModeBadge");
 const cycleCount = document.getElementById("cycleCount");
 const elapsedTime = document.getElementById("elapsedTime");
 const dailyCount = document.getElementById("dailyCount");
@@ -56,17 +60,26 @@ const startButton = document.getElementById("startButton");
 const pauseButton = document.getElementById("pauseButton");
 const resetButton = document.getElementById("resetButton");
 const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
+const pulsePanel = document.getElementById("pulsePanel");
+const pulseMeter = document.getElementById("pulseMeter");
+const pulseNote = document.getElementById("pulseNote");
+const pulseTrackFill = document.getElementById("pulseTrackFill");
+const pulseMarkers = Array.from(document.querySelectorAll(".pulse-marker"));
 const squeezeStepLabel = document.getElementById("squeezeStepLabel");
 const relaxStepLabel = document.getElementById("relaxStepLabel");
 const squeezeStep = document.getElementById("squeezeStep");
 const relaxStep = document.getElementById("relaxStep");
 
 let timerId = null;
+let animationFrameId = null;
 let isRunning = false;
 let hasStarted = false;
 let currentModeKey = loadModeKey();
+let modeSelectionComplete = loadModeSelectionComplete();
 let phaseIndex = 0;
 let secondsLeft = getCurrentPhases()[0].duration;
+let phaseStartedAt = 0;
+let pausedPhaseElapsedMs = 0;
 let cycles = 0;
 let elapsed = 0;
 let dailyCache = loadStoredObject(CACHE_KEY);
@@ -136,6 +149,26 @@ function loadModeKey() {
   return stored && MODES[stored] ? stored : "normal";
 }
 
+function loadModeSelectionComplete() {
+  try {
+    return window.sessionStorage.getItem(MODE_PICKED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveModeSelectionComplete(value) {
+  try {
+    if (value) {
+      window.sessionStorage.setItem(MODE_PICKED_KEY, "1");
+    } else {
+      window.sessionStorage.removeItem(MODE_PICKED_KEY);
+    }
+  } catch {
+    return;
+  }
+}
+
 function getCurrentMode() {
   return MODES[currentModeKey] ?? MODES.normal;
 }
@@ -151,6 +184,45 @@ function getStartHint() {
 
 function formatPhaseLabel(phase) {
   return `${phase.name} ${phase.duration} 秒`;
+}
+
+function getCurrentPhaseElapsedMs(now = performance.now()) {
+  if (!hasStarted) {
+    return 0;
+  }
+
+  const currentPhase = getCurrentPhases()[phaseIndex];
+  const durationMs = currentPhase.duration * 1000;
+
+  if (!isRunning) {
+    return Math.min(durationMs, pausedPhaseElapsedMs);
+  }
+
+  return Math.min(durationMs, Math.max(0, now - phaseStartedAt));
+}
+
+function getCurrentPhaseProgress(now = performance.now()) {
+  const currentPhase = getCurrentPhases()[phaseIndex];
+  if (!currentPhase) {
+    return 0;
+  }
+
+  return getCurrentPhaseElapsedMs(now) / (currentPhase.duration * 1000);
+}
+
+function getCycleProgress(now = performance.now()) {
+  const phases = getCurrentPhases();
+  const totalDuration = phases.reduce((sum, phase) => sum + phase.duration, 0);
+  const elapsedBeforePhase = phases
+    .slice(0, phaseIndex)
+    .reduce((sum, phase) => sum + phase.duration, 0);
+  const elapsedInCycle = elapsedBeforePhase + (getCurrentPhaseElapsedMs(now) / 1000);
+
+  if (totalDuration === 0) {
+    return 0;
+  }
+
+  return Math.min(1, Math.max(0, elapsedInCycle / totalDuration));
 }
 
 function getCachedCycles(dateKey) {
@@ -282,6 +354,90 @@ function updateModeSwitcher() {
   });
 }
 
+function updateModeHero() {
+  modeHero.hidden = modeSelectionComplete;
+
+  if (!modeSelectionComplete) {
+    modeHeroStatus.textContent = "选择后开始按钮才会启用";
+    return;
+  }
+
+  modeHeroStatus.textContent = `${getCurrentMode().name} 已选，可直接开始训练`;
+}
+
+function updateTrainingLayout() {
+  document.body.classList.toggle("mode-selected", modeSelectionComplete);
+}
+
+function updatePulseGraph(now = performance.now()) {
+  const isQuickMode = currentModeKey === "quick" && modeSelectionComplete;
+  pulsePanel.hidden = !isQuickMode;
+  pulsePanel.setAttribute("aria-hidden", String(!isQuickMode));
+
+  if (!isQuickMode) {
+    return;
+  }
+
+  const currentPhase = getCurrentPhases()[phaseIndex];
+  const phaseProgress = getCurrentPhaseProgress(now);
+  const cycleProgress = getCycleProgress(now);
+  let energy = 0.18;
+  let meterState = "idle";
+  let note = "跟着脉冲收紧 1 秒，再放松 2 秒";
+
+  if (hasStarted) {
+    if (phaseIndex === 0) {
+      energy = 0.42 + (phaseProgress * 0.58);
+      meterState = "squeeze";
+      note = isRunning
+        ? "脉冲快速上冲时收紧 1 秒"
+        : "暂停中，继续后从当前脉冲位置接着练";
+    } else {
+      energy = 1 - (phaseProgress * 0.76);
+      meterState = "relax";
+      note = isRunning
+        ? "脉冲缓慢回落的 2 秒里放松"
+        : "暂停中，继续后从当前脉冲位置接着练";
+    }
+  }
+
+  pulseMeter.dataset.phase = meterState;
+  pulseMeter.dataset.running = String(isRunning);
+  pulseMeter.style.setProperty("--pulse-energy", energy.toFixed(3));
+  pulseTrackFill.style.transform = `scaleX(${cycleProgress.toFixed(4)})`;
+  pulseNote.textContent = note;
+
+  const activeSegment = Math.min(2, Math.floor(cycleProgress * 3));
+  pulseMarkers.forEach((marker, index) => {
+    marker.classList.toggle("active", hasStarted && index === activeSegment);
+    marker.classList.toggle("complete", hasStarted && index < activeSegment);
+  });
+}
+
+function stopPulseAnimation() {
+  if (animationFrameId !== null) {
+    window.cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+}
+
+function runPulseAnimation() {
+  updatePulseGraph();
+
+  if (isRunning && currentModeKey === "quick" && modeSelectionComplete) {
+    animationFrameId = window.requestAnimationFrame(runPulseAnimation);
+  } else {
+    animationFrameId = null;
+  }
+}
+
+function startPulseAnimation() {
+  stopPulseAnimation();
+  if (currentModeKey === "quick" && modeSelectionComplete) {
+    animationFrameId = window.requestAnimationFrame(runPulseAnimation);
+  }
+}
+
 function getSyncMessage() {
   const pendingTotal = getPendingTotal();
 
@@ -306,10 +462,16 @@ function render() {
   const currentMode = getCurrentMode();
   const currentPhase = getCurrentPhases()[phaseIndex];
   const summary = buildSummary();
+  currentModeBadge.textContent = modeSelectionComplete ? currentMode.name : "待选模式";
 
-  modeDescription.textContent = currentMode.description;
+  modeDescription.textContent = modeSelectionComplete
+    ? "跟着倒计时和脉冲练习，系统会自动记录完成轮次。"
+    : "先选择普通模式或快速模式，再开始训练。";
 
-  if (!hasStarted) {
+  if (!modeSelectionComplete) {
+    phaseName.textContent = "先选模式";
+    phaseHint.textContent = "普通模式 5 秒收紧 / 5 秒放松，快速模式 1 秒收紧 / 2 秒放松";
+  } else if (!hasStarted) {
     phaseName.textContent = "准备开始";
     phaseHint.textContent = getStartHint();
   } else if (isRunning) {
@@ -320,7 +482,7 @@ function render() {
     phaseHint.textContent = "点击继续，从当前秒数接着练习";
   }
 
-  countdown.textContent = String(secondsLeft);
+  countdown.textContent = modeSelectionComplete ? String(secondsLeft) : "--";
   cycleCount.textContent = String(cycles);
   elapsedTime.textContent = String(elapsed);
   dailyCount.textContent = String(summary.todayCycles);
@@ -334,9 +496,14 @@ function render() {
   renderHistory();
   updateRhythm();
   updateModeSwitcher();
-  startButton.disabled = isRunning;
+  updateModeHero();
+  updateTrainingLayout();
+  updatePulseGraph();
+  startButton.disabled = isRunning || !modeSelectionComplete;
   pauseButton.disabled = !isRunning;
-  startButton.textContent = hasStarted ? "继续" : "开始";
+  startButton.textContent = modeSelectionComplete
+    ? (hasStarted ? "继续" : "开始")
+    : "先选模式";
 }
 
 async function requestStats(url, options = {}) {
@@ -447,6 +614,8 @@ function advancePhase() {
 
   phaseIndex = (phaseIndex + 1) % phases.length;
   secondsLeft = phases[phaseIndex].duration;
+  phaseStartedAt = performance.now();
+  pausedPhaseElapsedMs = 0;
   render();
 }
 
@@ -473,7 +642,9 @@ function startTimer() {
 
   hasStarted = true;
   isRunning = true;
+  phaseStartedAt = performance.now() - pausedPhaseElapsedMs;
   render();
+  startPulseAnimation();
   timerId = window.setInterval(tick, 1000);
 }
 
@@ -482,9 +653,11 @@ function pauseTimer() {
     return;
   }
 
+  pausedPhaseElapsedMs = getCurrentPhaseElapsedMs();
   isRunning = false;
   window.clearInterval(timerId);
   timerId = null;
+  stopPulseAnimation();
   render();
 }
 
@@ -492,8 +665,11 @@ function resetTimer() {
   isRunning = false;
   window.clearInterval(timerId);
   timerId = null;
+  stopPulseAnimation();
   phaseIndex = 0;
   secondsLeft = getCurrentPhases()[0].duration;
+  phaseStartedAt = 0;
+  pausedPhaseElapsedMs = 0;
   cycles = 0;
   elapsed = 0;
   hasStarted = false;
@@ -501,7 +677,15 @@ function resetTimer() {
 }
 
 function switchMode(nextModeKey) {
-  if (!MODES[nextModeKey] || nextModeKey === currentModeKey) {
+  if (!MODES[nextModeKey]) {
+    return;
+  }
+
+  modeSelectionComplete = true;
+  saveModeSelectionComplete(true);
+
+  if (nextModeKey === currentModeKey) {
+    render();
     return;
   }
 
