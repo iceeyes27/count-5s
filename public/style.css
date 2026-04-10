@@ -312,7 +312,6 @@ h1 {
 }
 
 .pulse-meter {
-  --wave-progress-length: 0;
   position: relative;
   min-height: 96px;
   margin-top: 12px;
@@ -338,6 +337,27 @@ h1 {
   overflow: hidden;
 }
 
+.pulse-axis {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 50%;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(197, 92, 61, 0.18), rgba(137, 59, 38, 0.95), rgba(197, 92, 61, 0.18));
+  box-shadow: 0 0 0 1px rgba(255, 249, 239, 0.75);
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.pulse-wave-scroll {
+  position: absolute;
+  inset: 0;
+  width: 400%;
+  height: 100%;
+  will-change: transform;
+}
+
 .pulse-wave {
   position: absolute;
   inset: 0;
@@ -357,16 +377,9 @@ h1 {
   stroke-width: 8;
 }
 
-.pulse-wave-active {
-  overflow: visible;
-}
-
 .pulse-wave-active path {
   stroke: var(--accent);
   stroke-width: 10;
-  stroke-linecap: butt;
-  stroke-dasharray: var(--wave-progress-length) 100;
-  stroke-dashoffset: 0;
   filter: drop-shadow(0 6px 14px rgba(197, 92, 61, 0.28));
 }
 
@@ -830,6 +843,11 @@ button:disabled {
 
   .pulse-wave-frame {
     inset: 10px 12px;
+  }
+
+  .pulse-axis {
+    top: 4px;
+    bottom: 4px;
   }
 
   .pulse-wave-guide path {

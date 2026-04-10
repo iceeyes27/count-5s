@@ -60,22 +60,29 @@
         <section class="pulse-panel" id="pulsePanel" aria-label="快速模式脉冲图" hidden>
           <div class="pulse-header">
             <p class="pulse-label">快速模式方波图</p>
-            <p class="pulse-note" id="pulseNote">方波高位收紧 1 秒，低位放松 2 秒</p>
+            <p class="pulse-note" id="pulseNote">方波向左经过纵轴，高位收紧，低位放松</p>
           </div>
           <div class="pulse-meter" id="pulseMeter" data-phase="idle" data-running="false">
             <div class="pulse-wave-frame" aria-hidden="true">
-              <svg class="pulse-wave pulse-wave-guide" viewBox="0 0 300 120" preserveAspectRatio="none">
-                <path
-                  pathLength="100"
-                  d="M 20 92 L 20 28 L 100 28 L 100 92 L 260 92 L 260 28 L 286 28"
-                ></path>
-              </svg>
-              <svg class="pulse-wave pulse-wave-active" viewBox="0 0 300 120" preserveAspectRatio="none">
-                <path
-                  pathLength="100"
-                  d="M 20 92 L 20 28 L 100 28 L 100 92 L 260 92 L 260 28 L 286 28"
-                ></path>
-              </svg>
+              <div class="pulse-axis" id="pulseAxis"></div>
+              <div class="pulse-wave-scroll" id="pulseWaveScroll">
+                <svg class="pulse-wave pulse-wave-guide" viewBox="0 0 1200 120" preserveAspectRatio="none">
+                  <path
+                    d="M 0 92 L 72 92 L 72 28 L 168 28 L 168 92 L 300 92
+                       L 372 92 L 372 28 L 468 28 L 468 92 L 600 92
+                       L 672 92 L 672 28 L 768 28 L 768 92 L 900 92
+                       L 972 92 L 972 28 L 1068 28 L 1068 92 L 1200 92"
+                  ></path>
+                </svg>
+                <svg class="pulse-wave pulse-wave-active" viewBox="0 0 1200 120" preserveAspectRatio="none">
+                  <path
+                    d="M 0 92 L 72 92 L 72 28 L 168 28 L 168 92 L 300 92
+                       L 372 92 L 372 28 L 468 28 L 468 92 L 600 92
+                       L 672 92 L 672 28 L 768 28 L 768 92 L 900 92
+                       L 972 92 L 972 28 L 1068 28 L 1068 92 L 1200 92"
+                  ></path>
+                </svg>
+              </div>
               <span class="pulse-axis-label pulse-axis-label-high">收紧</span>
               <span class="pulse-axis-label pulse-axis-label-low">放松</span>
             </div>

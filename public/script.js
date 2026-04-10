@@ -63,6 +63,7 @@ const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
 const pulsePanel = document.getElementById("pulsePanel");
 const pulseMeter = document.getElementById("pulseMeter");
 const pulseNote = document.getElementById("pulseNote");
+const pulseWaveScroll = document.getElementById("pulseWaveScroll");
 const pulseTrackFill = document.getElementById("pulseTrackFill");
 const pulseMarkers = Array.from(document.querySelectorAll(".pulse-marker"));
 const squeezeStepLabel = document.getElementById("squeezeStepLabel");
@@ -371,10 +372,6 @@ function updateTrainingLayout() {
 
 function updatePulseGraph(now = performance.now()) {
   const isQuickMode = currentModeKey === "quick" && modeSelectionComplete;
-  const waveRiseLength = 14;
-  const waveHoldLength = 17.5;
-  const waveDropLength = 14;
-  const waveRelaxLength = 34.9;
   pulsePanel.hidden = !isQuickMode;
   pulsePanel.setAttribute("aria-hidden", String(!isQuickMode));
 
@@ -382,36 +379,30 @@ function updatePulseGraph(now = performance.now()) {
     return;
   }
 
-  const currentPhase = getCurrentPhases()[phaseIndex];
-  const phaseProgress = getCurrentPhaseProgress(now);
   const cycleProgress = getCycleProgress(now);
   let meterState = "idle";
-  let note = "方波高位收紧 1 秒，低位放松 2 秒";
-  let waveProgressLength = 0;
+  let note = "方波向左经过纵轴，高位收紧，低位放松";
+  let waveShiftPercent = 0;
 
   if (hasStarted) {
+    waveShiftPercent = cycleProgress * 25;
+
     if (phaseIndex === 0) {
       meterState = "squeeze";
-      waveProgressLength = waveRiseLength + (phaseProgress * waveHoldLength);
       note = isRunning
-        ? "亮色方波停在高位时持续收紧 1 秒"
-        : "暂停中，继续后从当前方波位置接着练";
+        ? "纵轴对应高位平台时持续收紧 1 秒"
+        : "暂停中，继续后从当前纵轴位置接着练";
     } else {
       meterState = "relax";
-      waveProgressLength =
-        waveRiseLength +
-        waveHoldLength +
-        waveDropLength +
-        (phaseProgress * waveRelaxLength);
       note = isRunning
-        ? "亮色方波停在低位时持续放松 2 秒"
-        : "暂停中，继续后从当前方波位置接着练";
+        ? "纵轴对应低位平台时持续放松 2 秒"
+        : "暂停中，继续后从当前纵轴位置接着练";
     }
   }
 
   pulseMeter.dataset.phase = meterState;
   pulseMeter.dataset.running = String(isRunning);
-  pulseMeter.style.setProperty("--wave-progress-length", waveProgressLength.toFixed(2));
+  pulseWaveScroll.style.transform = `translate3d(-${waveShiftPercent.toFixed(3)}%, 0, 0)`;
   pulseTrackFill.style.transform = `scaleX(${cycleProgress.toFixed(4)})`;
   pulseNote.textContent = note;
 
