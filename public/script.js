@@ -371,6 +371,10 @@ function updateTrainingLayout() {
 
 function updatePulseGraph(now = performance.now()) {
   const isQuickMode = currentModeKey === "quick" && modeSelectionComplete;
+  const waveRiseLength = 14;
+  const waveHoldLength = 17.5;
+  const waveDropLength = 14;
+  const waveRelaxLength = 34.9;
   pulsePanel.hidden = !isQuickMode;
   pulsePanel.setAttribute("aria-hidden", String(!isQuickMode));
 
@@ -381,29 +385,33 @@ function updatePulseGraph(now = performance.now()) {
   const currentPhase = getCurrentPhases()[phaseIndex];
   const phaseProgress = getCurrentPhaseProgress(now);
   const cycleProgress = getCycleProgress(now);
-  let energy = 0.18;
   let meterState = "idle";
-  let note = "跟着脉冲收紧 1 秒，再放松 2 秒";
+  let note = "方波高位收紧 1 秒，低位放松 2 秒";
+  let waveProgressLength = 0;
 
   if (hasStarted) {
     if (phaseIndex === 0) {
-      energy = 0.42 + (phaseProgress * 0.58);
       meterState = "squeeze";
+      waveProgressLength = waveRiseLength + (phaseProgress * waveHoldLength);
       note = isRunning
-        ? "脉冲快速上冲时收紧 1 秒"
-        : "暂停中，继续后从当前脉冲位置接着练";
+        ? "亮色方波停在高位时持续收紧 1 秒"
+        : "暂停中，继续后从当前方波位置接着练";
     } else {
-      energy = 1 - (phaseProgress * 0.76);
       meterState = "relax";
+      waveProgressLength =
+        waveRiseLength +
+        waveHoldLength +
+        waveDropLength +
+        (phaseProgress * waveRelaxLength);
       note = isRunning
-        ? "脉冲缓慢回落的 2 秒里放松"
-        : "暂停中，继续后从当前脉冲位置接着练";
+        ? "亮色方波停在低位时持续放松 2 秒"
+        : "暂停中，继续后从当前方波位置接着练";
     }
   }
 
   pulseMeter.dataset.phase = meterState;
   pulseMeter.dataset.running = String(isRunning);
-  pulseMeter.style.setProperty("--pulse-energy", energy.toFixed(3));
+  pulseMeter.style.setProperty("--wave-progress-length", waveProgressLength.toFixed(2));
   pulseTrackFill.style.transform = `scaleX(${cycleProgress.toFixed(4)})`;
   pulseNote.textContent = note;
 
