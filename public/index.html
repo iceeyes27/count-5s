@@ -54,7 +54,6 @@
         <div class="controls">
           <button id="startButton" class="primary" type="button">开始</button>
           <button id="pauseButton" type="button">暂停</button>
-          <button id="resetButton" type="button">重置</button>
         </div>
 
         <section class="pulse-panel" id="pulsePanel" aria-label="快速模式脉冲图" hidden>
@@ -87,12 +86,6 @@
               <span class="pulse-axis-label pulse-axis-label-low">放松</span>
             </div>
           </div>
-          <div class="pulse-track" aria-hidden="true">
-            <div class="pulse-track-fill" id="pulseTrackFill"></div>
-            <span class="pulse-marker" data-segment="0">收</span>
-            <span class="pulse-marker" data-segment="1">松</span>
-            <span class="pulse-marker" data-segment="2">松</span>
-          </div>
         </section>
       </div>
 
@@ -110,7 +103,7 @@
       <section class="mode-card" aria-label="训练模式">
         <div class="mode-header">
           <p class="mode-label">切换模式</p>
-          <p class="mode-note">切换模式会重置当前训练</p>
+          <p class="mode-note">切换模式会重新开始当前训练</p>
         </div>
         <div class="mode-switch" aria-label="训练模式切换">
           <button
@@ -138,15 +131,11 @@
 
       <div class="stats">
         <article class="stat-box">
-          <span class="stat-title">本次轮次</span>
-          <strong id="cycleCount">0</strong>
-        </article>
-        <article class="stat-box">
-          <span class="stat-title">本次总秒数</span>
+          <span class="stat-title">本次练习时间</span>
           <strong id="elapsedTime">0</strong>
         </article>
         <article class="stat-box">
-          <span class="stat-title">当日累计轮次</span>
+          <span class="stat-title">今日累计时间</span>
           <strong id="dailyCount">0</strong>
         </article>
         <article class="stat-box status-box">
@@ -158,7 +147,7 @@
           <strong id="checkedDays">0</strong>
         </article>
         <article class="stat-box">
-          <span class="stat-title">累计打卡轮次</span>
+          <span class="stat-title">累计练习时间</span>
           <strong id="totalCount">0</strong>
         </article>
       </div>
@@ -166,15 +155,15 @@
       <section class="summary-card" aria-label="打卡总览">
         <div>
           <p class="summary-label">打卡总览</p>
-          <p class="summary-note" id="summaryText">今天还没开始，累计 0 天 / 0 轮</p>
+          <p class="summary-note" id="summaryText">今天还没开始，累计 0 天 / 0 秒</p>
           <p class="sync-note" id="syncStatus">Cloudflare 未连接，当前使用本机缓存</p>
         </div>
       </section>
 
-      <section class="history-card" aria-label="最近打卡记录">
+      <section class="history-card" aria-label="月份练习日历">
         <div class="history-header">
-          <p class="history-label">最近打卡记录</p>
-          <p class="history-note">按日期查看最近每天累计轮次</p>
+          <p class="history-label">月份练习日历</p>
+          <p class="history-note">按月份查看每天练习分钟</p>
         </div>
         <div class="history-list" id="historyList">还没有打卡记录</div>
       </section>

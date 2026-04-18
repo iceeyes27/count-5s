@@ -43,7 +43,7 @@ Pages 会自动识别仓库根目录下的 `functions/` 目录，因此不需要
 
 ## 3. 创建 D1 数据库并绑定到 Pages
 
-当前版本把“每日累计轮次”和“是否已打卡”持久化到 Cloudflare D1。你需要在 Cloudflare 后台完成以下配置：
+当前版本把“每日累计练习时间”和“是否已打卡”持久化到 Cloudflare D1。你需要在 Cloudflare 后台完成以下配置：
 
 1. 打开 `Workers & Pages`
 2. 进入 `D1 SQL Database`
