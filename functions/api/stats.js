@@ -1,4 +1,5 @@
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const LEGACY_CYCLE_SECONDS = 10;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -24,35 +25,46 @@ async function ensureSchema(db) {
       device_id TEXT NOT NULL,
       record_date TEXT NOT NULL,
       cycles INTEGER NOT NULL DEFAULT 0,
+      total_seconds INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (device_id, record_date)
     )`
   ).run();
+
+  const schema = await db.prepare("PRAGMA table_info(daily_counts)").all();
+  const columns = Array.isArray(schema.results) ? schema.results : [];
+  const hasTotalSeconds = columns.some((column) => column.name === "total_seconds");
+
+  if (!hasTotalSeconds) {
+    await db.prepare(
+      "ALTER TABLE daily_counts ADD COLUMN total_seconds INTEGER NOT NULL DEFAULT 0"
+    ).run();
+  }
 }
 
-async function readCycles(db, deviceId, recordDate) {
+async function readSeconds(db, deviceId, recordDate) {
   const result = await db
     .prepare(
-      `SELECT cycles
+      `SELECT total_seconds + (cycles * ?3) AS seconds
        FROM daily_counts
        WHERE device_id = ?1 AND record_date = ?2
        LIMIT 1`
     )
-    .bind(deviceId, recordDate)
+    .bind(deviceId, recordDate, LEGACY_CYCLE_SECONDS)
     .first();
 
-  return Number(result?.cycles ?? 0);
+  return Number(result?.seconds ?? 0);
 }
 
 async function listRecords(db, deviceId) {
   const result = await db
     .prepare(
-      `SELECT record_date AS date, cycles
+      `SELECT record_date AS date, total_seconds + (cycles * ?2) AS seconds
        FROM daily_counts
-       WHERE device_id = ?1 AND cycles > 0
+       WHERE device_id = ?1 AND (total_seconds > 0 OR cycles > 0)
        ORDER BY record_date DESC`
     )
-    .bind(deviceId)
+    .bind(deviceId, LEGACY_CYCLE_SECONDS)
     .all();
 
   return Array.isArray(result.results) ? result.results : [];
@@ -76,12 +88,12 @@ async function handleGet(context) {
 
   if (!recordDate) {
     const records = await listRecords(db, deviceId);
-    const totalCycles = records.reduce((sum, item) => sum + Number(item.cycles ?? 0), 0);
+    const totalSeconds = records.reduce((sum, item) => sum + Number(item.seconds ?? 0), 0);
 
     return json({
       records,
       totalDays: records.length,
-      totalCycles
+      totalSeconds
     });
   }
 
@@ -89,8 +101,8 @@ async function handleGet(context) {
     return json({ error: "Invalid date." }, 400);
   }
 
-  const cycles = await readCycles(db, deviceId, recordDate);
-  return json({ date: recordDate, cycles });
+  const seconds = await readSeconds(db, deviceId, recordDate);
+  return json({ date: recordDate, seconds });
 }
 
 async function handlePost(context) {
@@ -109,13 +121,15 @@ async function handlePost(context) {
 
   const recordDate = payload?.date;
   const deviceId = payload?.deviceId;
-  const delta = Number(payload?.delta);
+  const deltaSeconds = payload?.deltaSeconds === undefined
+    ? Number(payload?.delta) * LEGACY_CYCLE_SECONDS
+    : Number(payload.deltaSeconds);
 
   if (
     !isValidDateKey(recordDate) ||
     !isValidDeviceId(deviceId) ||
-    !Number.isInteger(delta) ||
-    delta <= 0
+    !Number.isInteger(deltaSeconds) ||
+    deltaSeconds <= 0
   ) {
     return json({ error: "Invalid payload." }, 400);
   }
@@ -123,17 +137,17 @@ async function handlePost(context) {
   await ensureSchema(db);
   await db
     .prepare(
-      `INSERT INTO daily_counts (device_id, record_date, cycles, updated_at)
+      `INSERT INTO daily_counts (device_id, record_date, total_seconds, updated_at)
        VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
        ON CONFLICT(device_id, record_date) DO UPDATE SET
-         cycles = daily_counts.cycles + excluded.cycles,
+         total_seconds = daily_counts.total_seconds + excluded.total_seconds,
          updated_at = CURRENT_TIMESTAMP`
     )
-    .bind(deviceId, recordDate, delta)
+    .bind(deviceId, recordDate, deltaSeconds)
     .run();
 
-  const cycles = await readCycles(db, deviceId, recordDate);
-  return json({ date: recordDate, cycles });
+  const seconds = await readSeconds(db, deviceId, recordDate);
+  return json({ date: recordDate, seconds });
 }
 
 export async function onRequest(context) {

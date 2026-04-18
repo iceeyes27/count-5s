@@ -29,22 +29,20 @@
     <rect x="80" y="160" width="700" height="1480" rx="48" fill="url(#panel)"/>
     <text x="140" y="245" fill="#893B26" font-size="30" font-family="Trebuchet MS, Segoe UI, sans-serif" letter-spacing="7">KEGEL TIMER</text>
     <text x="140" y="330" fill="#2F241F" font-size="68" font-weight="700" font-family="Georgia, Times New Roman, serif">凯格尔运动计时器</text>
-    <text x="140" y="415" fill="#6A554B" font-size="40" font-family="Trebuchet MS, Segoe UI, sans-serif">5 秒收紧，5 秒停留，自动循环，并记录完成轮次。</text>
+    <text x="140" y="415" fill="#6A554B" font-size="40" font-family="Trebuchet MS, Segoe UI, sans-serif">5 秒收紧，5 秒停留，自动循环，并记录练习时间。</text>
     <rect x="140" y="500" width="580" height="470" rx="42" fill="#FBF5EE" stroke="#E7D5C5" stroke-width="3"/>
     <text x="430" y="608" text-anchor="middle" fill="#6A554B" font-size="38" font-family="Trebuchet MS, Segoe UI, sans-serif">当前阶段</text>
     <text x="430" y="715" text-anchor="middle" fill="#2F241F" font-size="72" font-weight="700" font-family="Georgia, Times New Roman, serif">准备开始</text>
     <text x="430" y="840" text-anchor="middle" fill="#C55C3D" font-size="126" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">5</text>
     <text x="430" y="915" text-anchor="middle" fill="#6A554B" font-size="36" font-family="Trebuchet MS, Segoe UI, sans-serif">点击开始后进入 5 秒收紧</text>
-    <rect x="140" y="1004" width="178" height="92" rx="46" fill="url(#primary)"/>
-    <rect x="341" y="1004" width="178" height="92" rx="46" fill="white" fill-opacity="0.72"/>
-    <rect x="542" y="1004" width="178" height="92" rx="46" fill="white" fill-opacity="0.72"/>
-    <text x="229" y="1062" text-anchor="middle" fill="#FFF8F1" font-size="34" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">开始</text>
-    <text x="430" y="1062" text-anchor="middle" fill="#2F241F" font-size="34" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">暂停</text>
-    <text x="631" y="1062" text-anchor="middle" fill="#2F241F" font-size="34" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">重置</text>
+    <rect x="140" y="1004" width="278" height="92" rx="46" fill="url(#primary)"/>
+    <rect x="442" y="1004" width="278" height="92" rx="46" fill="white" fill-opacity="0.72"/>
+    <text x="279" y="1062" text-anchor="middle" fill="#FFF8F1" font-size="34" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">开始</text>
+    <text x="581" y="1062" text-anchor="middle" fill="#2F241F" font-size="34" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">暂停</text>
     <rect x="140" y="1132" width="280" height="184" rx="32" fill="white" fill-opacity="0.58" stroke="#E7D5C5" stroke-width="3"/>
     <rect x="440" y="1132" width="280" height="184" rx="32" fill="white" fill-opacity="0.58" stroke="#E7D5C5" stroke-width="3"/>
-    <text x="178" y="1198" fill="#6A554B" font-size="30" font-family="Trebuchet MS, Segoe UI, sans-serif">已完成轮次</text>
-    <text x="478" y="1198" fill="#6A554B" font-size="30" font-family="Trebuchet MS, Segoe UI, sans-serif">总秒数</text>
+    <text x="178" y="1198" fill="#6A554B" font-size="30" font-family="Trebuchet MS, Segoe UI, sans-serif">本次时间</text>
+    <text x="478" y="1198" fill="#6A554B" font-size="30" font-family="Trebuchet MS, Segoe UI, sans-serif">今日累计</text>
     <text x="178" y="1282" fill="#2F241F" font-size="72" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">0</text>
     <text x="478" y="1282" fill="#2F241F" font-size="72" font-weight="700" font-family="Trebuchet MS, Segoe UI, sans-serif">0</text>
     <rect x="140" y="1356" width="280" height="154" rx="28" fill="white" fill-opacity="0.50" stroke="#E7D5C5" stroke-width="3"/>

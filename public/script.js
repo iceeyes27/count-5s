@@ -1,14 +1,17 @@
 const API_ENDPOINT = "/api/stats";
-const CACHE_KEY = "kegel-daily-cache";
+const CACHE_KEY = "kegel-daily-seconds";
+const LEGACY_CACHE_KEY = "kegel-daily-cache";
 const DEVICE_ID_KEY = "kegel-device-id";
-const PENDING_SYNC_KEY = "kegel-pending-sync";
+const PENDING_SYNC_KEY = "kegel-pending-seconds";
+const LEGACY_PENDING_SYNC_KEY = "kegel-pending-sync";
 const MODE_KEY = "kegel-training-mode";
 const MODE_PICKED_KEY = "kegel-mode-picked";
+const LEGACY_CYCLE_SECONDS = 10;
 
 const MODES = {
   normal: {
     name: "普通模式",
-    description: "普通模式：5 秒收紧，5 秒放松，自动循环，并记录完成轮次。",
+    description: "普通模式：5 秒收紧，5 秒放松，自动循环，并记录练习时间。",
     phases: [
       {
         name: "收紧",
@@ -24,7 +27,7 @@ const MODES = {
   },
   quick: {
     name: "快速模式",
-    description: "快速模式：1 秒收紧，2 秒放松，自动循环，并记录完成轮次。",
+    description: "快速模式：1 秒收紧，2 秒放松，自动循环，并记录练习时间。",
     phases: [
       {
         name: "收紧",
@@ -47,7 +50,6 @@ const modeDescription = document.getElementById("modeDescription");
 const modeHero = document.getElementById("modeHero");
 const modeHeroStatus = document.getElementById("modeHeroStatus");
 const currentModeBadge = document.getElementById("currentModeBadge");
-const cycleCount = document.getElementById("cycleCount");
 const elapsedTime = document.getElementById("elapsedTime");
 const dailyCount = document.getElementById("dailyCount");
 const checkInStatus = document.getElementById("checkInStatus");
@@ -58,14 +60,11 @@ const syncStatus = document.getElementById("syncStatus");
 const historyList = document.getElementById("historyList");
 const startButton = document.getElementById("startButton");
 const pauseButton = document.getElementById("pauseButton");
-const resetButton = document.getElementById("resetButton");
 const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
 const pulsePanel = document.getElementById("pulsePanel");
 const pulseMeter = document.getElementById("pulseMeter");
 const pulseNote = document.getElementById("pulseNote");
 const pulseWaveScroll = document.getElementById("pulseWaveScroll");
-const pulseTrackFill = document.getElementById("pulseTrackFill");
-const pulseMarkers = Array.from(document.querySelectorAll(".pulse-marker"));
 const squeezeStepLabel = document.getElementById("squeezeStepLabel");
 const relaxStepLabel = document.getElementById("relaxStepLabel");
 const squeezeStep = document.getElementById("squeezeStep");
@@ -81,13 +80,13 @@ let phaseIndex = 0;
 let secondsLeft = getCurrentPhases()[0].duration;
 let phaseStartedAt = 0;
 let pausedPhaseElapsedMs = 0;
-let cycles = 0;
 let elapsed = 0;
-let dailyCache = loadStoredObject(CACHE_KEY);
-let pendingSync = loadStoredObject(PENDING_SYNC_KEY);
+let dailyCache = loadSecondsCache();
+let pendingSync = loadPendingSeconds();
 let deviceId = loadDeviceId();
 let remoteState = "local-cache";
 let syncInFlight = false;
+let syncTimeoutId = null;
 
 function getTodayDate() {
   const now = new Date();
@@ -124,6 +123,49 @@ function loadStoredObject(storageKey) {
 
 function saveStoredObject(storageKey, data) {
   window.localStorage.setItem(storageKey, JSON.stringify(data));
+}
+
+function mergeStoredObjects(primary, fallback) {
+  const merged = { ...primary };
+
+  Object.entries(fallback).forEach(([dateKey, value]) => {
+    merged[dateKey] = (merged[dateKey] ?? 0) + value;
+  });
+
+  return merged;
+}
+
+function convertLegacyCyclesToSeconds(data) {
+  return Object.entries(data).reduce((accumulator, [dateKey, cycles]) => {
+    accumulator[dateKey] = cycles * LEGACY_CYCLE_SECONDS;
+    return accumulator;
+  }, {});
+}
+
+function loadSecondsCache() {
+  const storedSeconds = loadStoredObject(CACHE_KEY);
+  const legacySeconds = convertLegacyCyclesToSeconds(loadStoredObject(LEGACY_CACHE_KEY));
+  const merged = mergeStoredObjects(storedSeconds, legacySeconds);
+
+  if (Object.keys(legacySeconds).length > 0) {
+    saveStoredObject(CACHE_KEY, merged);
+    window.localStorage.removeItem(LEGACY_CACHE_KEY);
+  }
+
+  return merged;
+}
+
+function loadPendingSeconds() {
+  const storedSeconds = loadStoredObject(PENDING_SYNC_KEY);
+  const legacySeconds = convertLegacyCyclesToSeconds(loadStoredObject(LEGACY_PENDING_SYNC_KEY));
+  const merged = mergeStoredObjects(storedSeconds, legacySeconds);
+
+  if (Object.keys(legacySeconds).length > 0) {
+    saveStoredObject(PENDING_SYNC_KEY, merged);
+    window.localStorage.removeItem(LEGACY_PENDING_SYNC_KEY);
+  }
+
+  return merged;
 }
 
 function createDeviceId() {
@@ -187,6 +229,23 @@ function formatPhaseLabel(phase) {
   return `${phase.name} ${phase.duration} 秒`;
 }
 
+function formatDuration(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours} 小时 ${minutes} 分钟` : `${hours} 小时`;
+  }
+
+  if (minutes > 0) {
+    return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分`;
+  }
+
+  return `${seconds} 秒`;
+}
+
 function getCurrentPhaseElapsedMs(now = performance.now()) {
   if (!hasStarted) {
     return 0;
@@ -226,11 +285,11 @@ function getCycleProgress(now = performance.now()) {
   return Math.min(1, Math.max(0, elapsedInCycle / totalDuration));
 }
 
-function getCachedCycles(dateKey) {
+function getCachedSeconds(dateKey) {
   return dailyCache[dateKey] ?? 0;
 }
 
-function getPendingCycles(dateKey) {
+function getPendingSeconds(dateKey) {
   return pendingSync[dateKey] ?? 0;
 }
 
@@ -238,11 +297,11 @@ function getPendingTotal() {
   return Object.values(pendingSync).reduce((sum, value) => sum + value, 0);
 }
 
-function setCachedCycles(dateKey, totalCycles) {
-  if (totalCycles <= 0) {
+function setCachedSeconds(dateKey, totalSeconds) {
+  if (totalSeconds <= 0) {
     delete dailyCache[dateKey];
   } else {
-    dailyCache[dateKey] = Math.floor(totalCycles);
+    dailyCache[dateKey] = Math.floor(totalSeconds);
   }
 
   saveStoredObject(CACHE_KEY, dailyCache);
@@ -253,13 +312,13 @@ function replaceCache(nextCache) {
   saveStoredObject(CACHE_KEY, dailyCache);
 }
 
-function addPendingCycles(dateKey, delta) {
-  pendingSync[dateKey] = getPendingCycles(dateKey) + delta;
+function addPendingSeconds(dateKey, deltaSeconds) {
+  pendingSync[dateKey] = getPendingSeconds(dateKey) + deltaSeconds;
   saveStoredObject(PENDING_SYNC_KEY, pendingSync);
 }
 
-function resolvePendingCycles(dateKey, syncedDelta, serverCycles) {
-  const currentPending = getPendingCycles(dateKey);
+function resolvePendingSeconds(dateKey, syncedDelta, serverSeconds) {
+  const currentPending = getPendingSeconds(dateKey);
   const nextPending = Math.max(0, currentPending - syncedDelta);
 
   if (nextPending === 0) {
@@ -269,15 +328,15 @@ function resolvePendingCycles(dateKey, syncedDelta, serverCycles) {
   }
 
   saveStoredObject(PENDING_SYNC_KEY, pendingSync);
-  setCachedCycles(dateKey, serverCycles + nextPending);
+  setCachedSeconds(dateKey, serverSeconds + nextPending);
 }
 
 function applyPendingToCache(sourceCache) {
   const mergedCache = { ...sourceCache };
 
-  for (const [dateKey, pendingCycles] of Object.entries(pendingSync)) {
-    if (pendingCycles > 0) {
-      mergedCache[dateKey] = (mergedCache[dateKey] ?? 0) + pendingCycles;
+  for (const [dateKey, pendingSeconds] of Object.entries(pendingSync)) {
+    if (pendingSeconds > 0) {
+      mergedCache[dateKey] = (mergedCache[dateKey] ?? 0) + pendingSeconds;
     }
   }
 
@@ -286,53 +345,108 @@ function applyPendingToCache(sourceCache) {
 
 function buildSummary() {
   const todayDate = getTodayDate();
-  const todayCycles = getCachedCycles(todayDate);
-  const totalCycles = Object.values(dailyCache).reduce((sum, value) => sum + value, 0);
+  const todaySeconds = getCachedSeconds(todayDate);
+  const totalSeconds = Object.values(dailyCache).reduce((sum, value) => sum + value, 0);
   const totalDays = Object.values(dailyCache).filter((value) => value > 0).length;
 
   return {
     todayDate,
-    todayCycles,
-    totalCycles,
+    todaySeconds,
+    totalSeconds,
     totalDays
   };
 }
 
-function buildHistoryRecords(limit = 10) {
-  return Object.entries(dailyCache)
-    .filter(([, cycles]) => cycles > 0)
-    .sort(([leftDate], [rightDate]) => rightDate.localeCompare(leftDate))
-    .slice(0, limit)
-    .map(([date, cycles]) => ({ date, cycles }));
+function buildMonthlyCalendars() {
+  const recordsByMonth = Object.entries(dailyCache)
+    .filter(([dateKey, seconds]) => isValidDateKey(dateKey) && seconds > 0)
+    .reduce((monthMap, [dateKey, seconds]) => {
+      const monthKey = dateKey.slice(0, 7);
+      const records = monthMap.get(monthKey) ?? new Map();
+      records.set(dateKey, Math.floor(seconds));
+      monthMap.set(monthKey, records);
+      return monthMap;
+    }, new Map());
+
+  return Array.from(recordsByMonth.entries())
+    .sort(([leftMonth], [rightMonth]) => rightMonth.localeCompare(leftMonth))
+    .map(([monthKey, records]) => ({ monthKey, records }));
 }
 
-function formatDateLabel(dateKey) {
-  const date = new Date(`${dateKey}T00:00:00`);
-  if (Number.isNaN(date.getTime())) {
-    return dateKey;
+function formatMonthLabel(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return `${year} 年 ${month} 月`;
+}
+
+function formatCalendarMinutes(seconds) {
+  return `${Math.max(1, Math.ceil(seconds / 60))} 分钟`;
+}
+
+function getMonthCells(monthKey, records) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const firstDay = new Date(year, month - 1, 1);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const leadingEmptyDays = (firstDay.getDay() + 6) % 7;
+  const cells = [];
+
+  for (let index = 0; index < leadingEmptyDays; index += 1) {
+    cells.push({ type: "empty", key: `${monthKey}-empty-${index}` });
   }
 
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    weekday: "short"
-  }).format(date);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dateKey = `${monthKey}-${String(day).padStart(2, "0")}`;
+    cells.push({
+      type: "day",
+      key: dateKey,
+      day,
+      seconds: records.get(dateKey) ?? 0
+    });
+  }
+
+  return cells;
 }
 
 function renderHistory() {
-  const records = buildHistoryRecords();
+  const months = buildMonthlyCalendars();
 
-  if (records.length === 0) {
+  if (months.length === 0) {
     historyList.innerHTML = '<div class="history-empty">还没有打卡记录</div>';
     return;
   }
 
-  historyList.innerHTML = records
+  historyList.innerHTML = months
     .map(
-      ({ date, cycles }) => `
-        <div class="history-item">
-          <span class="history-date">${date} ${formatDateLabel(date)}</span>
-          <span class="history-cycles">${cycles} 轮</span>
+      ({ monthKey, records }) => `
+        <div class="calendar-month">
+          <div class="calendar-month-header">
+            <span>${formatMonthLabel(monthKey)}</span>
+          </div>
+          <div class="calendar-weekdays" aria-hidden="true">
+            <span>一</span>
+            <span>二</span>
+            <span>三</span>
+            <span>四</span>
+            <span>五</span>
+            <span>六</span>
+            <span>日</span>
+          </div>
+          <div class="calendar-grid">
+            ${getMonthCells(monthKey, records)
+              .map((cell) => {
+                if (cell.type === "empty") {
+                  return '<span class="calendar-day calendar-day-empty" aria-hidden="true"></span>';
+                }
+
+                const hasPractice = cell.seconds > 0;
+                return `
+                  <div class="calendar-day${hasPractice ? " has-practice" : ""}" aria-label="${formatMonthLabel(monthKey)} ${cell.day} 日${hasPractice ? `，练习 ${formatCalendarMinutes(cell.seconds)}` : "，没有练习"}">
+                    <span class="calendar-date">${cell.day}</span>
+                    ${hasPractice ? `<span class="calendar-minutes">${formatCalendarMinutes(cell.seconds)}</span>` : ""}
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
         </div>
       `
     )
@@ -403,14 +517,7 @@ function updatePulseGraph(now = performance.now()) {
   pulseMeter.dataset.phase = meterState;
   pulseMeter.dataset.running = String(isRunning);
   pulseWaveScroll.style.transform = `translate3d(-${waveShiftPercent.toFixed(3)}%, 0, 0)`;
-  pulseTrackFill.style.transform = `scaleX(${cycleProgress.toFixed(4)})`;
   pulseNote.textContent = note;
-
-  const activeSegment = Math.min(2, Math.floor(cycleProgress * 3));
-  pulseMarkers.forEach((marker, index) => {
-    marker.classList.toggle("active", hasStarted && index === activeSegment);
-    marker.classList.toggle("complete", hasStarted && index < activeSegment);
-  });
 }
 
 function stopPulseAnimation() {
@@ -442,12 +549,12 @@ function getSyncMessage() {
 
   if (remoteState === "syncing") {
     return pendingTotal > 0
-      ? `Cloudflare 同步中，待上传 ${pendingTotal} 轮`
+      ? `Cloudflare 同步中，待上传 ${formatDuration(pendingTotal)}`
       : "Cloudflare 同步中";
   }
 
   if (pendingTotal > 0) {
-    return `Cloudflare 暂未同步，待上传 ${pendingTotal} 轮`;
+    return `Cloudflare 暂未同步，待上传 ${formatDuration(pendingTotal)}`;
   }
 
   if (remoteState === "synced") {
@@ -464,7 +571,7 @@ function render() {
   currentModeBadge.textContent = modeSelectionComplete ? currentMode.name : "待选模式";
 
   modeDescription.textContent = modeSelectionComplete
-    ? "跟着倒计时和脉冲练习，系统会自动记录完成轮次。"
+    ? "跟着倒计时和脉冲练习，系统会自动记录练习时间。"
     : "先选择普通模式或快速模式，再开始训练。";
 
   if (!modeSelectionComplete) {
@@ -482,15 +589,14 @@ function render() {
   }
 
   countdown.textContent = modeSelectionComplete ? String(secondsLeft) : "--";
-  cycleCount.textContent = String(cycles);
-  elapsedTime.textContent = String(elapsed);
-  dailyCount.textContent = String(summary.todayCycles);
-  checkInStatus.textContent = summary.todayCycles > 0 ? "今日已打卡" : "今日未打卡";
+  elapsedTime.textContent = formatDuration(elapsed);
+  dailyCount.textContent = formatDuration(summary.todaySeconds);
+  checkInStatus.textContent = summary.todaySeconds > 0 ? "今日已打卡" : "今日未打卡";
   checkedDays.textContent = String(summary.totalDays);
-  totalCount.textContent = String(summary.totalCycles);
-  summaryText.textContent = summary.todayCycles > 0
-    ? `今天已打卡 ${summary.todayCycles} 轮，累计 ${summary.totalDays} 天 / ${summary.totalCycles} 轮`
-    : `今天还没开始，累计 ${summary.totalDays} 天 / ${summary.totalCycles} 轮`;
+  totalCount.textContent = formatDuration(summary.totalSeconds);
+  summaryText.textContent = summary.todaySeconds > 0
+    ? `今天已练习 ${formatDuration(summary.todaySeconds)}，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`
+    : `今天还没开始，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
   syncStatus.textContent = getSyncMessage();
   renderHistory();
   updateRhythm();
@@ -527,8 +633,8 @@ function normalizeRecords(records) {
   }
 
   return records.reduce((accumulator, item) => {
-    if (isValidDateKey(item?.date) && Number.isFinite(item?.cycles) && item.cycles > 0) {
-      accumulator[item.date] = Math.floor(item.cycles);
+    if (isValidDateKey(item?.date) && Number.isFinite(item?.seconds) && item.seconds > 0) {
+      accumulator[item.date] = Math.floor(item.seconds);
     }
     return accumulator;
   }, {});
@@ -551,13 +657,14 @@ async function refreshFromCloudflare() {
 }
 
 async function flushPendingDate(dateKey) {
-  const delta = getPendingCycles(dateKey);
+  const delta = getPendingSeconds(dateKey);
 
   if (delta <= 0 || syncInFlight) {
     return;
   }
 
   syncInFlight = true;
+  let didSync = false;
 
   try {
     remoteState = "syncing";
@@ -567,12 +674,13 @@ async function flushPendingDate(dateKey) {
       method: "POST",
       body: JSON.stringify({
         date: dateKey,
-        delta,
+        deltaSeconds: delta,
         deviceId
       })
     });
 
-    resolvePendingCycles(dateKey, delta, Number(data.cycles));
+    resolvePendingSeconds(dateKey, delta, Number(data.seconds));
+    didSync = true;
     remoteState = "synced";
     render();
   } catch {
@@ -581,8 +689,12 @@ async function flushPendingDate(dateKey) {
   } finally {
     syncInFlight = false;
 
-    if (getPendingCycles(dateKey) > 0) {
-      void flushPendingDate(dateKey);
+    if (getPendingSeconds(dateKey) > 0) {
+      if (didSync) {
+        void flushPendingDate(dateKey);
+      } else {
+        schedulePendingSync();
+      }
     }
   }
 }
@@ -595,21 +707,26 @@ async function flushAllPendingDates() {
   }
 }
 
-function addCycleToToday() {
+function schedulePendingSync() {
+  if (syncTimeoutId !== null) {
+    return;
+  }
+
+  syncTimeoutId = window.setTimeout(() => {
+    syncTimeoutId = null;
+    void flushAllPendingDates();
+  }, 5000);
+}
+
+function addSecondToToday() {
   const todayDate = getTodayDate();
-  setCachedCycles(todayDate, getCachedCycles(todayDate) + 1);
-  addPendingCycles(todayDate, 1);
-  render();
-  void flushPendingDate(todayDate);
+  setCachedSeconds(todayDate, getCachedSeconds(todayDate) + 1);
+  addPendingSeconds(todayDate, 1);
+  schedulePendingSync();
 }
 
 function advancePhase() {
   const phases = getCurrentPhases();
-
-  if (phaseIndex === phases.length - 1) {
-    cycles += 1;
-    addCycleToToday();
-  }
 
   phaseIndex = (phaseIndex + 1) % phases.length;
   secondsLeft = phases[phaseIndex].duration;
@@ -625,6 +742,7 @@ function tick() {
 
   secondsLeft -= 1;
   elapsed += 1;
+  addSecondToToday();
 
   if (secondsLeft === 0) {
     advancePhase();
@@ -657,19 +775,20 @@ function pauseTimer() {
   window.clearInterval(timerId);
   timerId = null;
   stopPulseAnimation();
+  void flushAllPendingDates();
   render();
 }
 
-function resetTimer() {
+function restartCurrentSession() {
   isRunning = false;
   window.clearInterval(timerId);
   timerId = null;
   stopPulseAnimation();
+  void flushAllPendingDates();
   phaseIndex = 0;
   secondsLeft = getCurrentPhases()[0].duration;
   phaseStartedAt = 0;
   pausedPhaseElapsedMs = 0;
-  cycles = 0;
   elapsed = 0;
   hasStarted = false;
   render();
@@ -690,12 +809,11 @@ function switchMode(nextModeKey) {
 
   currentModeKey = nextModeKey;
   window.localStorage.setItem(MODE_KEY, currentModeKey);
-  resetTimer();
+  restartCurrentSession();
 }
 
 startButton.addEventListener("click", startTimer);
 pauseButton.addEventListener("click", pauseTimer);
-resetButton.addEventListener("click", resetTimer);
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
     switchMode(button.dataset.mode);

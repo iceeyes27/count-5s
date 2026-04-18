@@ -411,66 +411,10 @@ h1 {
   filter: drop-shadow(0 4px 10px rgba(137, 59, 38, 0.18));
 }
 
-.pulse-track {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.pulse-track::before {
-  content: "";
-  position: absolute;
-  inset: 12px 0 auto;
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(197, 92, 61, 0.12);
-}
-
-.pulse-track-fill {
-  position: absolute;
-  inset: 12px auto auto 0;
-  width: 100%;
-  height: 6px;
-  border-radius: 999px;
-  transform: scaleX(0);
-  transform-origin: left center;
-  background: linear-gradient(90deg, rgba(197, 92, 61, 0.72), rgba(137, 59, 38, 0.96));
-}
-
-.pulse-marker {
-  position: relative;
-  z-index: 1;
-  justify-self: center;
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  margin-top: 0;
-  border-radius: 50%;
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--accent-deep);
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(197, 92, 61, 0.18);
-  transition: transform 140ms ease, background 140ms ease, color 140ms ease;
-}
-
-.pulse-marker.active,
-.pulse-marker.complete {
-  color: #fff8f1;
-  background: var(--accent);
-}
-
-.pulse-marker.active {
-  transform: translateY(-2px);
-}
-
 .controls {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -543,12 +487,11 @@ h1 {
 }
 
 .history-list {
-  margin-top: 12px;
+  margin-top: 14px;
   display: grid;
-  gap: 8px;
+  gap: 14px;
 }
 
-.history-item,
 .history-empty {
   padding: 12px 14px;
   border-radius: 14px;
@@ -556,21 +499,73 @@ h1 {
   border: 1px solid rgba(93, 58, 41, 0.1);
 }
 
-.history-item {
+.calendar-month {
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(93, 58, 41, 0.1);
+}
+
+.calendar-month-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.history-date {
+  margin-bottom: 12px;
   font-weight: 700;
 }
 
-.history-cycles {
-  color: var(--accent-deep);
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.calendar-weekdays {
+  margin-bottom: 6px;
+  color: var(--text-soft);
+  font-size: 0.76rem;
   font-weight: 700;
-  white-space: nowrap;
+  text-align: center;
+}
+
+.calendar-day {
+  min-height: 48px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 3px;
+  padding: 6px 3px;
+  border-radius: 10px;
+  color: rgba(47, 36, 31, 0.58);
+  background: rgba(255, 249, 239, 0.7);
+  border: 1px solid rgba(93, 58, 41, 0.08);
+}
+
+.calendar-day-empty {
+  visibility: hidden;
+}
+
+.calendar-day.has-practice {
+  color: #fff8f1;
+  background: linear-gradient(145deg, var(--accent), var(--accent-deep));
+  border-color: rgba(137, 59, 38, 0.2);
+  box-shadow: 0 8px 16px rgba(137, 59, 38, 0.16);
+}
+
+.calendar-date {
+  font-size: 0.76rem;
+  line-height: 1;
+}
+
+.calendar-minutes {
+  max-width: 100%;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+  word-break: keep-all;
 }
 
 .history-empty {
@@ -864,23 +859,6 @@ button:disabled {
     font-size: 0.68rem;
   }
 
-  .pulse-track {
-    margin-top: 8px;
-    gap: 4px;
-  }
-
-  .pulse-track::before,
-  .pulse-track-fill {
-    inset: 11px 0 auto;
-    height: 5px;
-  }
-
-  .pulse-marker {
-    width: 28px;
-    height: 28px;
-    font-size: 0.72rem;
-  }
-
   .controls {
     position: sticky;
     bottom: calc(10px + env(safe-area-inset-bottom));
@@ -909,8 +887,7 @@ button:disabled {
     padding: 14px;
   }
 
-  .history-header,
-  .history-item {
+  .history-header {
     display: grid;
     gap: 4px;
   }
@@ -919,8 +896,22 @@ button:disabled {
     font-size: 0.8rem;
   }
 
-  .history-cycles {
-    justify-self: start;
+  .calendar-month {
+    padding: 12px;
+  }
+
+  .calendar-weekdays,
+  .calendar-grid {
+    gap: 4px;
+  }
+
+  .calendar-day {
+    min-height: 42px;
+    border-radius: 9px;
+  }
+
+  .calendar-minutes {
+    font-size: 0.62rem;
   }
 
   .sync-note {
