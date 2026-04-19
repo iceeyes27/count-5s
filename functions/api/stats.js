@@ -19,6 +19,10 @@ function isValidDeviceId(value) {
   return typeof value === "string" && value.length >= 8 && value.length <= 128;
 }
 
+function toLegacyCycles(seconds) {
+  return Math.floor(Number(seconds ?? 0) / LEGACY_CYCLE_SECONDS);
+}
+
 async function ensureSchema(db) {
   await db.prepare(
     `CREATE TABLE IF NOT EXISTS daily_counts (
@@ -56,6 +60,15 @@ async function readSeconds(db, deviceId, recordDate) {
   return Number(result?.seconds ?? 0);
 }
 
+function withLegacyCycles(record) {
+  const seconds = Number(record?.seconds ?? 0);
+  return {
+    ...record,
+    seconds,
+    cycles: toLegacyCycles(seconds)
+  };
+}
+
 async function listRecords(db, deviceId) {
   const result = await db
     .prepare(
@@ -67,7 +80,7 @@ async function listRecords(db, deviceId) {
     .bind(deviceId, LEGACY_CYCLE_SECONDS)
     .all();
 
-  return Array.isArray(result.results) ? result.results : [];
+  return Array.isArray(result.results) ? result.results.map(withLegacyCycles) : [];
 }
 
 async function handleGet(context) {
@@ -93,7 +106,8 @@ async function handleGet(context) {
     return json({
       records,
       totalDays: records.length,
-      totalSeconds
+      totalSeconds,
+      totalCycles: toLegacyCycles(totalSeconds)
     });
   }
 
@@ -102,7 +116,7 @@ async function handleGet(context) {
   }
 
   const seconds = await readSeconds(db, deviceId, recordDate);
-  return json({ date: recordDate, seconds });
+  return json({ date: recordDate, seconds, cycles: toLegacyCycles(seconds) });
 }
 
 async function handlePost(context) {
@@ -147,7 +161,7 @@ async function handlePost(context) {
     .run();
 
   const seconds = await readSeconds(db, deviceId, recordDate);
-  return json({ date: recordDate, seconds });
+  return json({ date: recordDate, seconds, cycles: toLegacyCycles(seconds) });
 }
 
 export async function onRequest(context) {

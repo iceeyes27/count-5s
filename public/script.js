@@ -246,6 +246,18 @@ function formatDuration(totalSeconds) {
   return `${seconds} 秒`;
 }
 
+function getRecordSeconds(record) {
+  if (Number.isFinite(record?.seconds)) {
+    return Math.floor(record.seconds);
+  }
+
+  if (Number.isFinite(record?.cycles)) {
+    return Math.floor(record.cycles) * LEGACY_CYCLE_SECONDS;
+  }
+
+  return 0;
+}
+
 function getCurrentPhaseElapsedMs(now = performance.now()) {
   if (!hasStarted) {
     return 0;
@@ -637,8 +649,10 @@ function normalizeRecords(records) {
   }
 
   return records.reduce((accumulator, item) => {
-    if (isValidDateKey(item?.date) && Number.isFinite(item?.seconds) && item.seconds > 0) {
-      accumulator[item.date] = Math.floor(item.seconds);
+    const seconds = getRecordSeconds(item);
+
+    if (isValidDateKey(item?.date) && seconds > 0) {
+      accumulator[item.date] = seconds;
     }
     return accumulator;
   }, {});
@@ -683,7 +697,7 @@ async function flushPendingDate(dateKey) {
       })
     });
 
-    resolvePendingSeconds(dateKey, delta, Number(data.seconds));
+    resolvePendingSeconds(dateKey, delta, getRecordSeconds(data));
     didSync = true;
     remoteState = "synced";
     render();
