@@ -533,9 +533,10 @@ h1 {
 .calendar-day {
   min-height: 48px;
   display: grid;
+  grid-template-rows: 1fr 1fr;
   align-content: center;
   justify-items: center;
-  gap: 3px;
+  gap: 2px;
   padding: 6px 3px;
   border-radius: 10px;
   color: rgba(47, 36, 31, 0.58);
@@ -557,6 +558,7 @@ h1 {
 .calendar-date {
   font-size: 0.76rem;
   line-height: 1;
+  align-self: end;
 }
 
 .calendar-minutes {
@@ -565,7 +567,9 @@ h1 {
   font-weight: 700;
   line-height: 1.1;
   text-align: center;
+  white-space: nowrap;
   word-break: keep-all;
+  align-self: start;
 }
 
 .history-empty {

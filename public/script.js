@@ -382,6 +382,10 @@ function formatCalendarMinutes(seconds) {
   return `${Math.max(1, Math.ceil(seconds / 60))} 分钟`;
 }
 
+function formatCalendarMinutesShort(seconds) {
+  return `${Math.max(1, Math.ceil(seconds / 60))} m`;
+}
+
 function getMonthCells(monthKey, records) {
   const [year, month] = monthKey.split("-").map(Number);
   const firstDay = new Date(year, month - 1, 1);
@@ -441,7 +445,7 @@ function renderHistory() {
                 return `
                   <div class="calendar-day${hasPractice ? " has-practice" : ""}" aria-label="${formatMonthLabel(monthKey)} ${cell.day} 日${hasPractice ? `，练习 ${formatCalendarMinutes(cell.seconds)}` : "，没有练习"}">
                     <span class="calendar-date">${cell.day}</span>
-                    ${hasPractice ? `<span class="calendar-minutes">${formatCalendarMinutes(cell.seconds)}</span>` : ""}
+                    ${hasPractice ? `<span class="calendar-minutes">${formatCalendarMinutesShort(cell.seconds)}</span>` : ""}
                   </div>
                 `;
               })
