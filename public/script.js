@@ -7,6 +7,7 @@ const LEGACY_PENDING_SYNC_KEY = "kegel-pending-sync";
 const MODE_KEY = "kegel-training-mode";
 const MODE_PICKED_KEY = "kegel-mode-picked";
 const LEGACY_CYCLE_SECONDS = 10;
+const CHECK_IN_SECONDS = 10 * 60;
 
 const MODES = {
   normal: {
@@ -358,8 +359,9 @@ function applyPendingToCache(sourceCache) {
 function buildSummary() {
   const todayDate = getTodayDate();
   const todaySeconds = getCachedSeconds(todayDate);
-  const totalSeconds = Object.values(dailyCache).reduce((sum, value) => sum + value, 0);
-  const totalDays = Object.values(dailyCache).filter((value) => value > 0).length;
+  const checkedSeconds = Object.values(dailyCache).filter((value) => value >= CHECK_IN_SECONDS);
+  const totalSeconds = checkedSeconds.reduce((sum, value) => sum + value, 0);
+  const totalDays = checkedSeconds.length;
 
   return {
     todayDate,
@@ -580,6 +582,30 @@ function getSyncMessage() {
   return "Cloudflare 未连接，当前使用本机缓存";
 }
 
+function isCheckedIn(seconds) {
+  return seconds >= CHECK_IN_SECONDS;
+}
+
+function getCheckInStatusText(seconds) {
+  if (isCheckedIn(seconds)) {
+    return "今日已打卡";
+  }
+
+  return seconds > 0 ? "未满 10 分钟" : "今日未打卡";
+}
+
+function getTodaySummaryText(summary) {
+  if (isCheckedIn(summary.todaySeconds)) {
+    return `今天已打卡 ${formatDuration(summary.todaySeconds)}，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
+  }
+
+  if (summary.todaySeconds > 0) {
+    return `今天已练习 ${formatDuration(summary.todaySeconds)}，未满 10 分钟，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
+  }
+
+  return `今天还没开始，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
+}
+
 function render() {
   const currentMode = getCurrentMode();
   const currentPhase = getCurrentPhases()[phaseIndex];
@@ -607,12 +633,10 @@ function render() {
   countdown.textContent = modeSelectionComplete ? String(secondsLeft) : "--";
   elapsedTime.textContent = formatDuration(elapsed);
   dailyCount.textContent = formatDuration(summary.todaySeconds);
-  checkInStatus.textContent = summary.todaySeconds > 0 ? "今日已打卡" : "今日未打卡";
+  checkInStatus.textContent = getCheckInStatusText(summary.todaySeconds);
   checkedDays.textContent = String(summary.totalDays);
   totalCount.textContent = formatDuration(summary.totalSeconds);
-  summaryText.textContent = summary.todaySeconds > 0
-    ? `今天已练习 ${formatDuration(summary.todaySeconds)}，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`
-    : `今天还没开始，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
+  summaryText.textContent = getTodaySummaryText(summary);
   syncStatus.textContent = getSyncMessage();
   renderHistory();
   updateRhythm();

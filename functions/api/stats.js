@@ -1,5 +1,6 @@
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const LEGACY_CYCLE_SECONDS = 10;
+const CHECK_IN_SECONDS = 10 * 60;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -65,7 +66,8 @@ function withLegacyCycles(record) {
   return {
     ...record,
     seconds,
-    cycles: toLegacyCycles(seconds)
+    cycles: toLegacyCycles(seconds),
+    isCheckedIn: seconds >= CHECK_IN_SECONDS
   };
 }
 
@@ -101,11 +103,12 @@ async function handleGet(context) {
 
   if (!recordDate) {
     const records = await listRecords(db, deviceId);
-    const totalSeconds = records.reduce((sum, item) => sum + Number(item.seconds ?? 0), 0);
+    const checkedRecords = records.filter((item) => item.isCheckedIn);
+    const totalSeconds = checkedRecords.reduce((sum, item) => sum + Number(item.seconds ?? 0), 0);
 
     return json({
       records,
-      totalDays: records.length,
+      totalDays: checkedRecords.length,
       totalSeconds,
       totalCycles: toLegacyCycles(totalSeconds)
     });
@@ -116,7 +119,12 @@ async function handleGet(context) {
   }
 
   const seconds = await readSeconds(db, deviceId, recordDate);
-  return json({ date: recordDate, seconds, cycles: toLegacyCycles(seconds) });
+  return json({
+    date: recordDate,
+    seconds,
+    cycles: toLegacyCycles(seconds),
+    isCheckedIn: seconds >= CHECK_IN_SECONDS
+  });
 }
 
 async function handlePost(context) {
@@ -161,7 +169,12 @@ async function handlePost(context) {
     .run();
 
   const seconds = await readSeconds(db, deviceId, recordDate);
-  return json({ date: recordDate, seconds, cycles: toLegacyCycles(seconds) });
+  return json({
+    date: recordDate,
+    seconds,
+    cycles: toLegacyCycles(seconds),
+    isCheckedIn: seconds >= CHECK_IN_SECONDS
+  });
 }
 
 export async function onRequest(context) {
