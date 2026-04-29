@@ -6,6 +6,7 @@ const PENDING_SYNC_KEY = "kegel-pending-seconds";
 const LEGACY_PENDING_SYNC_KEY = "kegel-pending-sync";
 const MODE_KEY = "kegel-training-mode";
 const MODE_PICKED_KEY = "kegel-mode-picked";
+const VOICE_KEY = "kegel-speech-voice";
 const LEGACY_CYCLE_SECONDS = 10;
 const CHECK_IN_SECONDS = 10 * 60;
 
@@ -44,6 +45,39 @@ const MODES = {
   }
 };
 
+const SPEECH_VOICES = {
+  xiaoxiao: {
+    name: "晓晓",
+    matchNames: ["microsoft xiaoxiao", "xiaoxiao", "晓晓"],
+    lang: "zh-CN",
+    fallbackLangs: ["zh-CN", "cmn-Hans-CN", "zh"],
+    fallbackNames: ["google 普通话", "google chinese", "ting-ting", "tingting"],
+    fallbackIndex: 0,
+    rate: 1,
+    pitch: 1.08
+  },
+  yunxi: {
+    name: "云希",
+    matchNames: ["microsoft yunxi", "yunxi", "云希"],
+    lang: "zh-TW",
+    fallbackLangs: ["zh-TW", "cmn-Hant-TW", "zh-CN", "zh"],
+    fallbackNames: ["google 國語", "google 国语", "mei-jia", "meijia"],
+    fallbackIndex: 1,
+    rate: 0.92,
+    pitch: 0.96
+  },
+  yunye: {
+    name: "云野",
+    matchNames: ["microsoft yunye", "yunye", "云野"],
+    lang: "zh-HK",
+    fallbackLangs: ["zh-HK", "yue-Hant-HK", "zh-TW", "zh-CN", "zh"],
+    fallbackNames: ["google 粤語", "google 粤语", "sin-ji", "sinji", "kangkang", "yunjian", "yunyang"],
+    fallbackIndex: -1,
+    rate: 0.88,
+    pitch: 0.78
+  }
+};
+
 const phaseName = document.getElementById("phaseName");
 const countdown = document.getElementById("countdown");
 const phaseHint = document.getElementById("phaseHint");
@@ -61,6 +95,7 @@ const syncStatus = document.getElementById("syncStatus");
 const historyList = document.getElementById("historyList");
 const startButton = document.getElementById("startButton");
 const pauseButton = document.getElementById("pauseButton");
+const voiceSelect = document.getElementById("voiceSelect");
 const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
 const pulsePanel = document.getElementById("pulsePanel");
 const pulseMeter = document.getElementById("pulseMeter");
@@ -76,6 +111,7 @@ let animationFrameId = null;
 let isRunning = false;
 let hasStarted = false;
 let currentModeKey = loadModeKey();
+let currentVoiceKey = loadVoiceKey();
 let modeSelectionComplete = loadModeSelectionComplete();
 let phaseIndex = 0;
 let secondsLeft = getCurrentPhases()[0].duration;
@@ -88,6 +124,7 @@ let deviceId = loadDeviceId();
 let remoteState = "local-cache";
 let syncInFlight = false;
 let syncTimeoutId = null;
+let browserSpeechVoices = [];
 
 function getTodayDate() {
   const now = new Date();
@@ -193,6 +230,11 @@ function loadModeKey() {
   return stored && MODES[stored] ? stored : "normal";
 }
 
+function loadVoiceKey() {
+  const stored = window.localStorage.getItem(VOICE_KEY);
+  return stored && SPEECH_VOICES[stored] ? stored : "xiaoxiao";
+}
+
 function loadModeSelectionComplete() {
   try {
     return window.sessionStorage.getItem(MODE_PICKED_KEY) === "1";
@@ -219,6 +261,129 @@ function getCurrentMode() {
 
 function getCurrentPhases() {
   return getCurrentMode().phases;
+}
+
+function canSpeak() {
+  return "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+}
+
+function loadBrowserSpeechVoices() {
+  if (!canSpeak()) {
+    browserSpeechVoices = [];
+    return browserSpeechVoices;
+  }
+
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length > 0) {
+    browserSpeechVoices = voices;
+  }
+  return browserSpeechVoices;
+}
+
+function scheduleSpeechVoiceLoad() {
+  if (!canSpeak()) {
+    return;
+  }
+
+  [50, 250, 800, 1500].forEach((delay) => {
+    window.setTimeout(loadBrowserSpeechVoices, delay);
+  });
+}
+
+function normalizeSpeechText(value) {
+  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function getVoiceSearchText(voice) {
+  return normalizeSpeechText(`${voice.name} ${voice.voiceURI} ${voice.lang}`);
+}
+
+function isChineseSpeechVoice(voice) {
+  const lang = normalizeSpeechText(voice.lang);
+  const name = getVoiceSearchText(voice);
+
+  return (
+    lang.startsWith("zh") ||
+    lang.startsWith("cmn") ||
+    lang.startsWith("yue") ||
+    name.includes("chinese") ||
+    name.includes("mandarin") ||
+    name.includes("普通话") ||
+    name.includes("國語") ||
+    name.includes("国语") ||
+    name.includes("粤語") ||
+    name.includes("粤语")
+  );
+}
+
+function findVoiceByNames(voices, names) {
+  const matchNames = names.map(normalizeSpeechText);
+  return voices.find((voice) => {
+    const searchText = getVoiceSearchText(voice);
+    return matchNames.some((matchName) => searchText.includes(matchName));
+  });
+}
+
+function findVoiceByLangs(voices, langs) {
+  const normalizedLangs = langs.map(normalizeSpeechText);
+  return voices.find((voice) => {
+    const voiceLang = normalizeSpeechText(voice.lang);
+    return normalizedLangs.some((lang) => voiceLang === lang || voiceLang.startsWith(`${lang}-`));
+  });
+}
+
+function getIndexedFallbackVoice(voices, fallbackIndex) {
+  if (voices.length === 0) {
+    return null;
+  }
+
+  if (fallbackIndex < 0) {
+    return voices[voices.length - 1];
+  }
+
+  return voices[Math.min(fallbackIndex, voices.length - 1)];
+}
+
+function findSpeechVoice() {
+  const voices = loadBrowserSpeechVoices();
+  const voiceConfig = SPEECH_VOICES[currentVoiceKey] ?? SPEECH_VOICES.xiaoxiao;
+  const chineseVoices = voices.filter(isChineseSpeechVoice);
+  const candidateVoices = chineseVoices.length > 0 ? chineseVoices : voices;
+
+  return (
+    findVoiceByNames(candidateVoices, voiceConfig.matchNames) ||
+    findVoiceByNames(candidateVoices, voiceConfig.fallbackNames) ||
+    findVoiceByLangs(candidateVoices, voiceConfig.fallbackLangs) ||
+    getIndexedFallbackVoice(candidateVoices, voiceConfig.fallbackIndex) ||
+    null
+  );
+}
+
+function cancelSpeech() {
+  if (canSpeak()) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+function speakPhase(phase) {
+  if (!phase || !canSpeak()) {
+    return;
+  }
+
+  cancelSpeech();
+
+  const voiceConfig = SPEECH_VOICES[currentVoiceKey] ?? SPEECH_VOICES.xiaoxiao;
+  const utterance = new SpeechSynthesisUtterance(phase.name);
+  const selectedVoice = findSpeechVoice();
+  if (selectedVoice) {
+    utterance.voice = selectedVoice;
+  }
+  utterance.lang = selectedVoice?.lang || voiceConfig.lang;
+  utterance.rate = voiceConfig.rate;
+  utterance.pitch = voiceConfig.pitch;
+  utterance.volume = 1;
+  window.speechSynthesis.resume();
+  window.speechSynthesis.speak(utterance);
 }
 
 function getStartHint() {
@@ -487,6 +652,12 @@ function updateModeSwitcher() {
   });
 }
 
+function updateVoiceSelect() {
+  if (voiceSelect) {
+    voiceSelect.value = currentVoiceKey;
+  }
+}
+
 function updateModeHero() {
   modeHero.hidden = modeSelectionComplete;
 
@@ -641,6 +812,7 @@ function render() {
   renderHistory();
   updateRhythm();
   updateModeSwitcher();
+  updateVoiceSelect();
   updateModeHero();
   updateTrainingLayout();
   updatePulseGraph();
@@ -775,6 +947,7 @@ function advancePhase() {
   phaseStartedAt = performance.now();
   pausedPhaseElapsedMs = 0;
   render();
+  speakPhase(phases[phaseIndex]);
 }
 
 function tick() {
@@ -803,6 +976,7 @@ function startTimer() {
   isRunning = true;
   phaseStartedAt = performance.now() - pausedPhaseElapsedMs;
   render();
+  speakPhase(getCurrentPhases()[phaseIndex]);
   startPulseAnimation();
   timerId = window.setInterval(tick, 1000);
 }
@@ -817,6 +991,7 @@ function pauseTimer() {
   window.clearInterval(timerId);
   timerId = null;
   stopPulseAnimation();
+  cancelSpeech();
   void flushAllPendingDates();
   render();
 }
@@ -826,6 +1001,7 @@ function restartCurrentSession() {
   window.clearInterval(timerId);
   timerId = null;
   stopPulseAnimation();
+  cancelSpeech();
   void flushAllPendingDates();
   phaseIndex = 0;
   secondsLeft = getCurrentPhases()[0].duration;
@@ -854,8 +1030,34 @@ function switchMode(nextModeKey) {
   restartCurrentSession();
 }
 
+function switchVoice(nextVoiceKey) {
+  if (!SPEECH_VOICES[nextVoiceKey]) {
+    return;
+  }
+
+  currentVoiceKey = nextVoiceKey;
+  window.localStorage.setItem(VOICE_KEY, currentVoiceKey);
+  const hadVoices = loadBrowserSpeechVoices().length > 0;
+
+  if (isRunning) {
+    speakPhase(getCurrentPhases()[phaseIndex]);
+    if (!hadVoices) {
+      window.setTimeout(() => {
+        if (isRunning) {
+          speakPhase(getCurrentPhases()[phaseIndex]);
+        }
+      }, 250);
+    }
+  }
+}
+
 startButton.addEventListener("click", startTimer);
 pauseButton.addEventListener("click", pauseTimer);
+if (voiceSelect) {
+  voiceSelect.addEventListener("change", () => {
+    switchVoice(voiceSelect.value);
+  });
+}
 modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
     switchMode(button.dataset.mode);
@@ -865,6 +1067,14 @@ window.addEventListener("online", () => {
   void refreshFromCloudflare();
   void flushAllPendingDates();
 });
+if (canSpeak()) {
+  loadBrowserSpeechVoices();
+  scheduleSpeechVoiceLoad();
+  window.speechSynthesis.onvoiceschanged = loadBrowserSpeechVoices;
+  if (window.speechSynthesis.addEventListener) {
+    window.speechSynthesis.addEventListener("voiceschanged", loadBrowserSpeechVoices);
+  }
+}
 
 render();
 void refreshFromCloudflare();

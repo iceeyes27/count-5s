@@ -228,6 +228,29 @@ h1 {
   color: rgba(255, 248, 241, 0.86);
 }
 
+.voice-setting {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.voice-label {
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.voice-select {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid rgba(93, 58, 41, 0.14);
+  border-radius: 14px;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.76);
+  font: inherit;
+}
+
 .timer-card {
   margin-top: 20px;
   padding: 24px 22px 22px;
@@ -781,6 +804,18 @@ button:disabled {
   .mode-switch {
     margin-top: 10px;
     gap: 8px;
+  }
+
+  .voice-setting {
+    margin-top: 10px;
+    gap: 6px;
+  }
+
+  .voice-select {
+    min-height: 42px;
+    padding: 9px 12px;
+    border-radius: 12px;
+    font-size: 0.9rem;
   }
 
   .mode-button {
