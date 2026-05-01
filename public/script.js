@@ -128,7 +128,7 @@ let syncInFlight = false;
 let syncTimeoutId = null;
 let browserSpeechVoices = [];
 let backgroundAudio = null;
-let backgroundAudioUrl = "";
+let backgroundAudioSrc = "";
 let backgroundAudioModeKey = "";
 let backgroundAudioRunning = false;
 let backgroundAudioError = "";
@@ -407,82 +407,6 @@ function getCycleDurationSeconds() {
   return getCurrentPhases().reduce((sum, phase) => sum + phase.duration, 0);
 }
 
-function getPhaseStartOffsets(modeKey = currentModeKey) {
-  let offset = 0;
-  return (MODES[modeKey] ?? MODES.normal).phases.map((phase) => {
-    const phaseOffset = { phase, start: offset };
-    offset += phase.duration;
-    return phaseOffset;
-  });
-}
-
-function writeAscii(view, offset, value) {
-  for (let index = 0; index < value.length; index += 1) {
-    view.setUint8(offset + index, value.charCodeAt(index));
-  }
-}
-
-function addTone(samples, sampleRate, startSeconds, durationSeconds, frequency, volume) {
-  const startSample = Math.max(0, Math.floor(startSeconds * sampleRate));
-  const sampleCount = Math.max(1, Math.floor(durationSeconds * sampleRate));
-  const endSample = Math.min(samples.length, startSample + sampleCount);
-
-  for (let index = startSample; index < endSample; index += 1) {
-    const localTime = (index - startSample) / sampleRate;
-    const releaseTime = Math.max(0, durationSeconds - localTime);
-    const envelope = Math.min(1, localTime / 0.018, releaseTime / 0.035);
-    samples[index] += Math.sin(2 * Math.PI * frequency * localTime) * volume * envelope;
-  }
-}
-
-function createCueAudioBlob(modeKey) {
-  const mode = MODES[modeKey] ?? MODES.normal;
-  const sampleRate = 22050;
-  const durationSeconds = mode.phases.reduce((sum, phase) => sum + phase.duration, 0);
-  const samples = new Float32Array(Math.ceil(durationSeconds * sampleRate));
-
-  for (let index = 0; index < samples.length; index += 1) {
-    const time = index / sampleRate;
-    samples[index] = Math.sin(2 * Math.PI * 55 * time) * 0.002;
-  }
-
-  getPhaseStartOffsets(modeKey).forEach(({ phase, start }) => {
-    if (phase.name === "收紧") {
-      addTone(samples, sampleRate, start, 0.18, 880, 0.42);
-      addTone(samples, sampleRate, start + 0.2, 0.14, 1174.66, 0.34);
-    } else {
-      addTone(samples, sampleRate, start, 0.22, 392, 0.38);
-      addTone(samples, sampleRate, start + 0.26, 0.16, 293.66, 0.3);
-    }
-  });
-
-  const dataSize = samples.length * 2;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-  writeAscii(view, 0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true);
-  writeAscii(view, 8, "WAVE");
-  writeAscii(view, 12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeAscii(view, 36, "data");
-  view.setUint32(40, dataSize, true);
-
-  let writeOffset = 44;
-  for (const sample of samples) {
-    const clamped = Math.max(-1, Math.min(1, sample));
-    view.setInt16(writeOffset, clamped * 0x7fff, true);
-    writeOffset += 2;
-  }
-
-  return new Blob([buffer], { type: "audio/wav" });
-}
-
 function ensureBackgroundAudioElement() {
   if (backgroundAudio) {
     return backgroundAudio;
@@ -517,17 +441,15 @@ function ensureBackgroundAudioElement() {
 
 function prepareBackgroundAudio() {
   const audio = ensureBackgroundAudioElement();
-  if (backgroundAudioModeKey === currentModeKey && backgroundAudioUrl) {
+  const nextAudioSrc = `./audio/kegel-${currentModeKey}.m4a`;
+
+  if (backgroundAudioModeKey === currentModeKey && backgroundAudioSrc === nextAudioSrc) {
     return audio;
   }
 
-  if (backgroundAudioUrl) {
-    URL.revokeObjectURL(backgroundAudioUrl);
-  }
-
-  backgroundAudioUrl = URL.createObjectURL(createCueAudioBlob(currentModeKey));
+  backgroundAudioSrc = nextAudioSrc;
   backgroundAudioModeKey = currentModeKey;
-  audio.src = backgroundAudioUrl;
+  audio.src = backgroundAudioSrc;
   audio.load();
   return audio;
 }
@@ -605,7 +527,7 @@ function stopBackgroundAudio({ reset = false } = {}) {
 
 function getAudioStatusText() {
   if (!modeSelectionComplete) {
-    return "iPhone 锁屏播放：选择模式后，点击开始启用节奏提示音";
+    return "iPhone 锁屏播放：选择模式后，点击开始启用收紧/放松语音";
   }
 
   if (backgroundAudioError) {
@@ -613,14 +535,14 @@ function getAudioStatusText() {
   }
 
   if (isRunning && backgroundAudioRunning) {
-    return "iPhone 锁屏播放已启用：锁屏后节奏提示音会继续播放";
+    return "iPhone 锁屏播放已启用：锁屏后收紧/放松语音会继续播放";
   }
 
   if (isRunning) {
-    return "正在启动 iPhone 锁屏节奏音";
+    return "正在启动 iPhone 锁屏语音播报";
   }
 
-  return "iPhone 锁屏播放：开始后启用节奏提示音，退出页面后停止";
+  return "iPhone 锁屏播放：开始后启用收紧/放松语音，退出页面后停止";
 }
 
 function updateMediaSession() {
