@@ -441,6 +441,13 @@ h1 {
   gap: 12px;
 }
 
+.audio-status {
+  margin: 12px 0 0;
+  color: var(--accent-deep);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .stats {
   margin-top: 16px;
   display: grid;

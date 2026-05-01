@@ -85,6 +85,7 @@ const modeDescription = document.getElementById("modeDescription");
 const modeHero = document.getElementById("modeHero");
 const modeHeroStatus = document.getElementById("modeHeroStatus");
 const currentModeBadge = document.getElementById("currentModeBadge");
+const audioStatus = document.getElementById("audioStatus");
 const elapsedTime = document.getElementById("elapsedTime");
 const dailyCount = document.getElementById("dailyCount");
 const checkInStatus = document.getElementById("checkInStatus");
@@ -118,6 +119,7 @@ let secondsLeft = getCurrentPhases()[0].duration;
 let phaseStartedAt = 0;
 let pausedPhaseElapsedMs = 0;
 let elapsed = 0;
+let lastAccountingAtMs = 0;
 let dailyCache = loadSecondsCache();
 let pendingSync = loadPendingSeconds();
 let deviceId = loadDeviceId();
@@ -125,11 +127,26 @@ let remoteState = "local-cache";
 let syncInFlight = false;
 let syncTimeoutId = null;
 let browserSpeechVoices = [];
+let backgroundAudio = null;
+let backgroundAudioUrl = "";
+let backgroundAudioModeKey = "";
+let backgroundAudioRunning = false;
+let backgroundAudioError = "";
+let stoppingBackgroundAudio = false;
 
 function getTodayDate() {
-  const now = new Date();
+  return getDateKeyForTime(Date.now());
+}
+
+function getDateKeyForTime(timestampMs) {
+  const now = new Date(timestampMs);
   const offset = now.getTimezoneOffset() * 60 * 1000;
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+}
+
+function getNextLocalMidnightMs(timestampMs) {
+  const date = new Date(timestampMs);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
 }
 
 function isValidDateKey(value) {
@@ -384,6 +401,252 @@ function speakPhase(phase) {
   utterance.volume = 1;
   window.speechSynthesis.resume();
   window.speechSynthesis.speak(utterance);
+}
+
+function getCycleDurationSeconds() {
+  return getCurrentPhases().reduce((sum, phase) => sum + phase.duration, 0);
+}
+
+function getPhaseStartOffsets(modeKey = currentModeKey) {
+  let offset = 0;
+  return (MODES[modeKey] ?? MODES.normal).phases.map((phase) => {
+    const phaseOffset = { phase, start: offset };
+    offset += phase.duration;
+    return phaseOffset;
+  });
+}
+
+function writeAscii(view, offset, value) {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
+}
+
+function addTone(samples, sampleRate, startSeconds, durationSeconds, frequency, volume) {
+  const startSample = Math.max(0, Math.floor(startSeconds * sampleRate));
+  const sampleCount = Math.max(1, Math.floor(durationSeconds * sampleRate));
+  const endSample = Math.min(samples.length, startSample + sampleCount);
+
+  for (let index = startSample; index < endSample; index += 1) {
+    const localTime = (index - startSample) / sampleRate;
+    const releaseTime = Math.max(0, durationSeconds - localTime);
+    const envelope = Math.min(1, localTime / 0.018, releaseTime / 0.035);
+    samples[index] += Math.sin(2 * Math.PI * frequency * localTime) * volume * envelope;
+  }
+}
+
+function createCueAudioBlob(modeKey) {
+  const mode = MODES[modeKey] ?? MODES.normal;
+  const sampleRate = 22050;
+  const durationSeconds = mode.phases.reduce((sum, phase) => sum + phase.duration, 0);
+  const samples = new Float32Array(Math.ceil(durationSeconds * sampleRate));
+
+  for (let index = 0; index < samples.length; index += 1) {
+    const time = index / sampleRate;
+    samples[index] = Math.sin(2 * Math.PI * 55 * time) * 0.002;
+  }
+
+  getPhaseStartOffsets(modeKey).forEach(({ phase, start }) => {
+    if (phase.name === "收紧") {
+      addTone(samples, sampleRate, start, 0.18, 880, 0.42);
+      addTone(samples, sampleRate, start + 0.2, 0.14, 1174.66, 0.34);
+    } else {
+      addTone(samples, sampleRate, start, 0.22, 392, 0.38);
+      addTone(samples, sampleRate, start + 0.26, 0.16, 293.66, 0.3);
+    }
+  });
+
+  const dataSize = samples.length * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, dataSize, true);
+
+  let writeOffset = 44;
+  for (const sample of samples) {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    view.setInt16(writeOffset, clamped * 0x7fff, true);
+    writeOffset += 2;
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+function ensureBackgroundAudioElement() {
+  if (backgroundAudio) {
+    return backgroundAudio;
+  }
+
+  backgroundAudio = document.createElement("audio");
+  backgroundAudio.loop = true;
+  backgroundAudio.preload = "auto";
+  backgroundAudio.setAttribute("playsinline", "");
+  backgroundAudio.setAttribute("webkit-playsinline", "");
+  backgroundAudio.addEventListener("play", () => {
+    backgroundAudioRunning = true;
+    backgroundAudioError = "";
+    render();
+  });
+  backgroundAudio.addEventListener("pause", () => {
+    backgroundAudioRunning = false;
+    if (isRunning && !stoppingBackgroundAudio) {
+      pauseTimer();
+      return;
+    }
+    render();
+  });
+  backgroundAudio.addEventListener("error", () => {
+    backgroundAudioRunning = false;
+    backgroundAudioError = "节奏音加载失败，当前使用前台语音播报";
+    render();
+  });
+  document.body.appendChild(backgroundAudio);
+  return backgroundAudio;
+}
+
+function prepareBackgroundAudio() {
+  const audio = ensureBackgroundAudioElement();
+  if (backgroundAudioModeKey === currentModeKey && backgroundAudioUrl) {
+    return audio;
+  }
+
+  if (backgroundAudioUrl) {
+    URL.revokeObjectURL(backgroundAudioUrl);
+  }
+
+  backgroundAudioUrl = URL.createObjectURL(createCueAudioBlob(currentModeKey));
+  backgroundAudioModeKey = currentModeKey;
+  audio.src = backgroundAudioUrl;
+  audio.load();
+  return audio;
+}
+
+function getPreciseElapsedSeconds() {
+  if (!isRunning || lastAccountingAtMs === 0) {
+    return elapsed;
+  }
+
+  return elapsed + Math.max(0, Date.now() - lastAccountingAtMs) / 1000;
+}
+
+function getCurrentCycleOffsetSeconds() {
+  const cycleDuration = getCycleDurationSeconds();
+  if (cycleDuration <= 0) {
+    return 0;
+  }
+
+  return getPreciseElapsedSeconds() % cycleDuration;
+}
+
+async function startBackgroundAudio() {
+  try {
+    const audio = prepareBackgroundAudio();
+    const cycleOffset = getCurrentCycleOffsetSeconds();
+    const setAudioOffset = () => {
+      try {
+        if (Number.isFinite(audio.duration) && audio.duration > 0) {
+          audio.currentTime = Math.min(cycleOffset, Math.max(0, audio.duration - 0.05));
+        } else if (audio.readyState > 0) {
+          audio.currentTime = cycleOffset;
+        }
+      } catch {
+        return;
+      }
+    };
+
+    if (audio.readyState > 0) {
+      setAudioOffset();
+    } else {
+      audio.addEventListener("loadedmetadata", setAudioOffset, { once: true });
+    }
+
+    await audio.play();
+    backgroundAudioRunning = true;
+    backgroundAudioError = "";
+    render();
+    updateMediaSession();
+    return true;
+  } catch {
+    backgroundAudioRunning = false;
+    backgroundAudioError = "iPhone 锁屏节奏音未能启动，请确认已通过页面按钮开始";
+    render();
+    return false;
+  }
+}
+
+function stopBackgroundAudio({ reset = false } = {}) {
+  if (!backgroundAudio) {
+    backgroundAudioRunning = false;
+    return;
+  }
+
+  stoppingBackgroundAudio = true;
+  backgroundAudio.pause();
+  if (reset) {
+    backgroundAudio.currentTime = 0;
+  }
+  backgroundAudioRunning = false;
+  window.setTimeout(() => {
+    stoppingBackgroundAudio = false;
+  }, 0);
+  updateMediaSession();
+}
+
+function getAudioStatusText() {
+  if (!modeSelectionComplete) {
+    return "iPhone 锁屏播放：选择模式后，点击开始启用节奏提示音";
+  }
+
+  if (backgroundAudioError) {
+    return backgroundAudioError;
+  }
+
+  if (isRunning && backgroundAudioRunning) {
+    return "iPhone 锁屏播放已启用：锁屏后节奏提示音会继续播放";
+  }
+
+  if (isRunning) {
+    return "正在启动 iPhone 锁屏节奏音";
+  }
+
+  return "iPhone 锁屏播放：开始后启用节奏提示音，退出页面后停止";
+}
+
+function updateMediaSession() {
+  if (!("mediaSession" in navigator)) {
+    return;
+  }
+
+  if (typeof MediaMetadata !== "undefined") {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: "凯格尔运动计时器",
+      artist: getCurrentMode().name,
+      album: "收紧 / 放松节奏提示"
+    });
+  }
+  navigator.mediaSession.playbackState = isRunning && backgroundAudioRunning ? "playing" : "paused";
+
+  try {
+    navigator.mediaSession.setActionHandler("play", () => {
+      void startTimer();
+    });
+    navigator.mediaSession.setActionHandler("pause", () => {
+      pauseTimer();
+    });
+  } catch {
+    return;
+  }
 }
 
 function getStartHint() {
@@ -803,6 +1066,9 @@ function render() {
 
   countdown.textContent = modeSelectionComplete ? String(secondsLeft) : "--";
   elapsedTime.textContent = formatDuration(elapsed);
+  if (audioStatus) {
+    audioStatus.textContent = getAudioStatusText();
+  }
   dailyCount.textContent = formatDuration(summary.todaySeconds);
   checkInStatus.textContent = getCheckInStatusText(summary.todaySeconds);
   checkedDays.textContent = String(summary.totalDays);
@@ -932,22 +1198,90 @@ function schedulePendingSync() {
   }, 5000);
 }
 
-function addSecondToToday() {
-  const todayDate = getTodayDate();
-  setCachedSeconds(todayDate, getCachedSeconds(todayDate) + 1);
-  addPendingSeconds(todayDate, 1);
+function addSecondsToDate(dateKey, deltaSeconds) {
+  if (deltaSeconds <= 0) {
+    return;
+  }
+
+  setCachedSeconds(dateKey, getCachedSeconds(dateKey) + deltaSeconds);
+  addPendingSeconds(dateKey, deltaSeconds);
   schedulePendingSync();
 }
 
-function advancePhase() {
-  const phases = getCurrentPhases();
+function addElapsedSeconds(startMs, deltaSeconds) {
+  let cursorMs = startMs;
+  let remainingSeconds = deltaSeconds;
 
-  phaseIndex = (phaseIndex + 1) % phases.length;
-  secondsLeft = phases[phaseIndex].duration;
-  phaseStartedAt = performance.now();
-  pausedPhaseElapsedMs = 0;
-  render();
-  speakPhase(phases[phaseIndex]);
+  while (remainingSeconds > 0) {
+    const nextMidnightMs = getNextLocalMidnightMs(cursorMs);
+    const secondsUntilMidnight = Math.max(1, Math.ceil((nextMidnightMs - cursorMs) / 1000));
+    const secondsForDate = Math.min(remainingSeconds, secondsUntilMidnight);
+    addSecondsToDate(getDateKeyForTime(cursorMs), secondsForDate);
+    cursorMs += secondsForDate * 1000;
+    remainingSeconds -= secondsForDate;
+  }
+}
+
+function getPhaseStateFromElapsed(totalElapsedSeconds) {
+  const phases = getCurrentPhases();
+  const cycleDuration = phases.reduce((sum, phase) => sum + phase.duration, 0);
+  let cyclePosition = cycleDuration > 0 ? totalElapsedSeconds % cycleDuration : 0;
+
+  for (let index = 0; index < phases.length; index += 1) {
+    const phase = phases[index];
+    if (cyclePosition < phase.duration) {
+      return {
+        phaseIndex: index,
+        secondsIntoPhase: cyclePosition,
+        secondsLeft: phase.duration - cyclePosition
+      };
+    }
+    cyclePosition -= phase.duration;
+  }
+
+  return {
+    phaseIndex: 0,
+    secondsIntoPhase: 0,
+    secondsLeft: phases[0].duration
+  };
+}
+
+function applyPhaseStateFromElapsed(now = performance.now()) {
+  const state = getPhaseStateFromElapsed(elapsed);
+  phaseIndex = state.phaseIndex;
+  secondsLeft = state.secondsLeft;
+
+  if (isRunning) {
+    phaseStartedAt = now - (state.secondsIntoPhase * 1000);
+  } else {
+    pausedPhaseElapsedMs = state.secondsIntoPhase * 1000;
+  }
+}
+
+function accountElapsedToNow(nowMs = Date.now()) {
+  if (!isRunning || lastAccountingAtMs === 0) {
+    return 0;
+  }
+
+  const deltaSeconds = Math.floor((nowMs - lastAccountingAtMs) / 1000);
+  if (deltaSeconds <= 0) {
+    return 0;
+  }
+
+  const accountedFromMs = lastAccountingAtMs;
+  lastAccountingAtMs += deltaSeconds * 1000;
+  elapsed += deltaSeconds;
+  addElapsedSeconds(accountedFromMs, deltaSeconds);
+  applyPhaseStateFromElapsed();
+  return deltaSeconds;
+}
+
+function announcePhaseIfNeeded(previousPhaseIndex) {
+  if (previousPhaseIndex === phaseIndex || backgroundAudioRunning) {
+    return;
+  }
+
+  speakPhase(getCurrentPhases()[phaseIndex]);
 }
 
 function tick() {
@@ -955,29 +1289,34 @@ function tick() {
     return;
   }
 
-  secondsLeft -= 1;
-  elapsed += 1;
-  addSecondToToday();
-
-  if (secondsLeft === 0) {
-    advancePhase();
-    return;
-  }
-
+  const previousPhaseIndex = phaseIndex;
+  accountElapsedToNow();
+  announcePhaseIfNeeded(previousPhaseIndex);
   render();
 }
 
-function startTimer() {
+async function startTimer() {
   if (isRunning) {
     return;
   }
 
   hasStarted = true;
   isRunning = true;
+  lastAccountingAtMs = Date.now();
   phaseStartedAt = performance.now() - pausedPhaseElapsedMs;
   render();
-  speakPhase(getCurrentPhases()[phaseIndex]);
+  const hasBackgroundAudio = await startBackgroundAudio();
+  if (!isRunning) {
+    stopBackgroundAudio({ reset: true });
+    return;
+  }
+  if (!hasBackgroundAudio) {
+    speakPhase(getCurrentPhases()[phaseIndex]);
+  }
   startPulseAnimation();
+  if (timerId !== null) {
+    window.clearInterval(timerId);
+  }
   timerId = window.setInterval(tick, 1000);
 }
 
@@ -986,11 +1325,14 @@ function pauseTimer() {
     return;
   }
 
+  accountElapsedToNow();
   pausedPhaseElapsedMs = getCurrentPhaseElapsedMs();
   isRunning = false;
+  lastAccountingAtMs = 0;
   window.clearInterval(timerId);
   timerId = null;
   stopPulseAnimation();
+  stopBackgroundAudio();
   cancelSpeech();
   void flushAllPendingDates();
   render();
@@ -998,9 +1340,11 @@ function pauseTimer() {
 
 function restartCurrentSession() {
   isRunning = false;
+  lastAccountingAtMs = 0;
   window.clearInterval(timerId);
   timerId = null;
   stopPulseAnimation();
+  stopBackgroundAudio({ reset: true });
   cancelSpeech();
   void flushAllPendingDates();
   phaseIndex = 0;
@@ -1039,11 +1383,11 @@ function switchVoice(nextVoiceKey) {
   window.localStorage.setItem(VOICE_KEY, currentVoiceKey);
   const hadVoices = loadBrowserSpeechVoices().length > 0;
 
-  if (isRunning) {
+  if (isRunning && !backgroundAudioRunning) {
     speakPhase(getCurrentPhases()[phaseIndex]);
     if (!hadVoices) {
       window.setTimeout(() => {
-        if (isRunning) {
+        if (isRunning && !backgroundAudioRunning) {
           speakPhase(getCurrentPhases()[phaseIndex]);
         }
       }, 250);
@@ -1051,7 +1395,20 @@ function switchVoice(nextVoiceKey) {
   }
 }
 
-startButton.addEventListener("click", startTimer);
+function refreshRunningState() {
+  if (!isRunning) {
+    return;
+  }
+
+  const previousPhaseIndex = phaseIndex;
+  accountElapsedToNow();
+  announcePhaseIfNeeded(previousPhaseIndex);
+  render();
+}
+
+startButton.addEventListener("click", () => {
+  void startTimer();
+});
 pauseButton.addEventListener("click", pauseTimer);
 if (voiceSelect) {
   voiceSelect.addEventListener("change", () => {
@@ -1064,9 +1421,13 @@ modeButtons.forEach((button) => {
   });
 });
 window.addEventListener("online", () => {
+  refreshRunningState();
   void refreshFromCloudflare();
   void flushAllPendingDates();
 });
+window.addEventListener("focus", refreshRunningState);
+window.addEventListener("pageshow", refreshRunningState);
+document.addEventListener("visibilitychange", refreshRunningState);
 if (canSpeak()) {
   loadBrowserSpeechVoices();
   scheduleSpeechVoiceLoad();
