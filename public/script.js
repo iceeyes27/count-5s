@@ -148,7 +148,7 @@ let backgroundAudioRunning = false;
 let backgroundAudioError = "";
 let stoppingBackgroundAudio = false;
 let immediateCuePhaseIndex = null;
-let initialCueTimeoutId = null;
+let suppressedBackgroundPhaseIndex = null;
 
 function getTodayDate() {
   return getDateKeyForTime(Date.now());
@@ -398,16 +398,9 @@ function cancelSpeech() {
   }
 }
 
-function cancelInitialPhaseCue() {
-  if (initialCueTimeoutId !== null) {
-    window.clearTimeout(initialCueTimeoutId);
-    initialCueTimeoutId = null;
-  }
-}
-
 function speakPhase(phase) {
   if (!phase || currentVoiceKey === "mute" || !canSpeak()) {
-    return;
+    return false;
   }
 
   cancelSpeech();
@@ -424,6 +417,7 @@ function speakPhase(phase) {
   utterance.volume = 1;
   window.speechSynthesis.resume();
   window.speechSynthesis.speak(utterance);
+  return true;
 }
 
 function getCycleDurationSeconds() {
@@ -441,7 +435,7 @@ function ensureBackgroundAudioElement() {
   backgroundAudio.setAttribute("playsinline", "");
   backgroundAudio.setAttribute("webkit-playsinline", "");
   backgroundAudio.addEventListener("play", () => {
-    cancelInitialPhaseCue();
+    updateBackgroundAudioVolume();
     backgroundAudioRunning = true;
     backgroundAudioError = "";
     render();
@@ -476,6 +470,24 @@ function prepareBackgroundAudio() {
   audio.src = backgroundAudioSrc;
   audio.load();
   return audio;
+}
+
+function updateBackgroundAudioVolume() {
+  if (!backgroundAudio) {
+    return;
+  }
+
+  if (
+    isRunning &&
+    suppressedBackgroundPhaseIndex !== null &&
+    phaseIndex === suppressedBackgroundPhaseIndex
+  ) {
+    backgroundAudio.volume = 0;
+    return;
+  }
+
+  suppressedBackgroundPhaseIndex = null;
+  backgroundAudio.volume = 1;
 }
 
 function getPreciseElapsedSeconds() {
@@ -524,8 +536,10 @@ async function startBackgroundAudio() {
       audio.addEventListener("loadedmetadata", setAudioOffset, { once: true });
     }
 
+    updateBackgroundAudioVolume();
     await audio.play();
     setAudioOffset();
+    updateBackgroundAudioVolume();
     backgroundAudioRunning = true;
     backgroundAudioError = "";
     render();
@@ -1269,27 +1283,20 @@ function announcePhaseIfNeeded(previousPhaseIndex) {
 function speakInitialPhaseCue() {
   if (currentVoiceKey === "mute") {
     immediateCuePhaseIndex = null;
-    return;
+    suppressedBackgroundPhaseIndex = null;
+    return false;
   }
 
   immediateCuePhaseIndex = phaseIndex;
-  speakPhase(getCurrentPhases()[phaseIndex]);
-}
-
-function scheduleInitialPhaseCue() {
-  cancelInitialPhaseCue();
-  immediateCuePhaseIndex = null;
-
-  if (currentVoiceKey === "mute") {
-    return;
+  if (speakPhase(getCurrentPhases()[phaseIndex])) {
+    suppressedBackgroundPhaseIndex = phaseIndex;
+    updateBackgroundAudioVolume();
+    return true;
   }
 
-  initialCueTimeoutId = window.setTimeout(() => {
-    initialCueTimeoutId = null;
-    if (isRunning && !backgroundAudioRunning) {
-      speakInitialPhaseCue();
-    }
-  }, 350);
+  immediateCuePhaseIndex = null;
+  suppressedBackgroundPhaseIndex = null;
+  return false;
 }
 
 function tick() {
@@ -1299,6 +1306,7 @@ function tick() {
 
   const previousPhaseIndex = phaseIndex;
   accountElapsedToNow();
+  updateBackgroundAudioVolume();
   announcePhaseIfNeeded(previousPhaseIndex);
   render();
 }
@@ -1313,7 +1321,7 @@ async function startTimer() {
   lastAccountingAtMs = Date.now();
   phaseStartedAt = performance.now() - pausedPhaseElapsedMs;
   render();
-  scheduleInitialPhaseCue();
+  speakInitialPhaseCue();
   startPulseAnimation();
   if (timerId !== null) {
     window.clearInterval(timerId);
@@ -1322,12 +1330,11 @@ async function startTimer() {
 
   const hasBackgroundAudio = await startBackgroundAudio();
   if (!isRunning) {
-    cancelInitialPhaseCue();
     immediateCuePhaseIndex = null;
+    suppressedBackgroundPhaseIndex = null;
     stopBackgroundAudio({ reset: true });
     return;
   }
-  cancelInitialPhaseCue();
   if (!hasBackgroundAudio && immediateCuePhaseIndex !== phaseIndex) {
     speakPhase(getCurrentPhases()[phaseIndex]);
   }
@@ -1348,8 +1355,8 @@ function pauseTimer() {
   stopPulseAnimation();
   stopBackgroundAudio();
   cancelSpeech();
-  cancelInitialPhaseCue();
   immediateCuePhaseIndex = null;
+  suppressedBackgroundPhaseIndex = null;
   void flushAllPendingDates();
   render();
 }
@@ -1362,8 +1369,8 @@ function restartCurrentSession() {
   stopPulseAnimation();
   stopBackgroundAudio({ reset: true });
   cancelSpeech();
-  cancelInitialPhaseCue();
   immediateCuePhaseIndex = null;
+  suppressedBackgroundPhaseIndex = null;
   void flushAllPendingDates();
   phaseIndex = 0;
   secondsLeft = getCurrentPhases()[0].duration;
@@ -1403,6 +1410,8 @@ function switchVoice(nextVoiceKey) {
   if (currentVoiceKey === "mute") {
     stopBackgroundAudio();
     cancelSpeech();
+    immediateCuePhaseIndex = null;
+    suppressedBackgroundPhaseIndex = null;
     render();
     return;
   }
@@ -1436,6 +1445,22 @@ function refreshRunningState() {
   render();
 }
 
+function primeStartAssets() {
+  loadBrowserSpeechVoices();
+
+  if (currentVoiceKey === "mute") {
+    return;
+  }
+
+  try {
+    prepareBackgroundAudio();
+  } catch {
+    return;
+  }
+}
+
+startButton.addEventListener("pointerdown", primeStartAssets, { passive: true });
+startButton.addEventListener("touchstart", primeStartAssets, { passive: true });
 startButton.addEventListener("click", () => {
   void startTimer();
 });
