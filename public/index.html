@@ -12,50 +12,34 @@
     <section class="panel">
       <p class="eyebrow">Kegel Timer</p>
       <h1>凯格尔运动计时器</h1>
-      <p class="description" id="modeDescription">先选择普通模式或快速模式，再开始训练。</p>
+      <p class="description" id="modeDescription">默认普通模式，打开微信后可直接开始。</p>
 
-      <section class="mode-hero" id="modeHero" aria-label="选择训练模式">
-        <div class="mode-hero-copy">
-          <p class="mode-hero-label">第一步</p>
-          <h2 class="mode-hero-title">先选训练模式</h2>
-          <p class="mode-hero-note" id="modeHeroStatus">选择后开始按钮才会启用</p>
-        </div>
-        <div class="mode-hero-switch" aria-label="训练模式选择">
-          <button
-            class="mode-button mode-button-hero active"
-            type="button"
-            data-mode="normal"
-            aria-pressed="true"
-          >
-            普通模式
-            <span>5 秒收紧 / 5 秒放松</span>
-          </button>
-          <button
-            class="mode-button mode-button-hero"
-            type="button"
-            data-mode="quick"
-            aria-pressed="false"
-          >
-            快速模式
-            <span>1 秒收紧 / 2 秒放松</span>
-          </button>
-        </div>
-      </section>
-
-      <div class="timer-card" aria-live="polite">
+      <div class="timer-card">
         <div class="training-meta">
-          <span class="mode-badge" id="currentModeBadge">待选模式</span>
+          <span class="mode-badge" id="currentModeBadge">普通模式</span>
         </div>
         <p class="phase-label">当前阶段</p>
-        <h2 id="phaseName">准备开始</h2>
+        <h2 id="phaseName" aria-live="polite">准备开始</h2>
         <div class="countdown" id="countdown">--</div>
         <p class="subtext" id="phaseHint">点击开始后进入 5 秒收紧</p>
 
         <div class="controls">
           <button id="startButton" class="primary" type="button">开始</button>
           <button id="pauseButton" type="button">暂停</button>
+          <button id="endButton" type="button">结束</button>
         </div>
-        <p class="audio-status" id="audioStatus">iPhone 锁屏播放：开始后启用收紧/放松语音</p>
+        <p class="audio-status" id="audioStatus">微信内播放：点击开始后启用收紧/放松提示音</p>
+
+        <section class="checkin-progress" aria-label="今日打卡进度">
+          <div class="checkin-progress-header">
+            <span>今日打卡进度</span>
+            <strong id="checkInProgressText">0 / 10 分钟</strong>
+          </div>
+          <div class="checkin-progress-track">
+            <div class="checkin-progress-fill" id="checkInProgressFill"></div>
+          </div>
+          <p id="checkInRemainingText">距离打卡还差 10 分钟</p>
+        </section>
 
         <section class="pulse-panel" id="pulsePanel" aria-label="快速模式脉冲图" hidden>
           <div class="pulse-header">
@@ -103,7 +87,7 @@
 
       <section class="mode-card" aria-label="训练模式">
         <div class="mode-header">
-          <p class="mode-label">切换模式</p>
+          <p class="mode-label">训练模式</p>
           <p class="mode-note">切换模式会重新开始当前训练</p>
         </div>
         <div class="mode-switch" aria-label="训练模式切换">
@@ -129,11 +113,12 @@
           </button>
         </div>
         <div class="voice-setting">
-          <label class="voice-label" for="voiceSelect">前台备用语音</label>
+          <label class="voice-label" for="voiceSelect">提示语音</label>
           <select class="voice-select" id="voiceSelect">
-            <option value="xiaoxiao">晓晓 Xiaoxiao（明亮亲和，适用于对话）</option>
-            <option value="yunxi">云希 Yunxi（温柔自然，适合听书）</option>
-            <option value="yunye">云野 Yunye（沉稳深沉）</option>
+            <option value="xiaoxiao">明亮女声</option>
+            <option value="yunxi">温和男声</option>
+            <option value="yunye">低沉男声</option>
+            <option value="mute">静音</option>
           </select>
         </div>
       </section>
@@ -156,7 +141,7 @@
           <strong id="checkedDays">0</strong>
         </article>
         <article class="stat-box">
-          <span class="stat-title">累计练习时间</span>
+          <span class="stat-title">打卡累计时间</span>
           <strong id="totalCount">0</strong>
         </article>
       </div>
@@ -165,7 +150,7 @@
         <div>
           <p class="summary-label">打卡总览</p>
           <p class="summary-note" id="summaryText">今天还没开始，累计 0 天 / 0 秒</p>
-          <p class="sync-note" id="syncStatus">Cloudflare 未连接，当前使用本机缓存</p>
+          <p class="sync-note" id="syncStatus">数据已保存在本机</p>
         </div>
       </section>
 

@@ -75,6 +75,16 @@ const SPEECH_VOICES = {
     fallbackIndex: -1,
     rate: 0.88,
     pitch: 0.78
+  },
+  mute: {
+    name: "静音",
+    matchNames: [],
+    lang: "zh-CN",
+    fallbackLangs: [],
+    fallbackNames: [],
+    fallbackIndex: 0,
+    rate: 1,
+    pitch: 1
   }
 };
 
@@ -86,6 +96,9 @@ const modeHero = document.getElementById("modeHero");
 const modeHeroStatus = document.getElementById("modeHeroStatus");
 const currentModeBadge = document.getElementById("currentModeBadge");
 const audioStatus = document.getElementById("audioStatus");
+const checkInProgressText = document.getElementById("checkInProgressText");
+const checkInProgressFill = document.getElementById("checkInProgressFill");
+const checkInRemainingText = document.getElementById("checkInRemainingText");
 const elapsedTime = document.getElementById("elapsedTime");
 const dailyCount = document.getElementById("dailyCount");
 const checkInStatus = document.getElementById("checkInStatus");
@@ -96,6 +109,7 @@ const syncStatus = document.getElementById("syncStatus");
 const historyList = document.getElementById("historyList");
 const startButton = document.getElementById("startButton");
 const pauseButton = document.getElementById("pauseButton");
+const endButton = document.getElementById("endButton");
 const voiceSelect = document.getElementById("voiceSelect");
 const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
 const pulsePanel = document.getElementById("pulsePanel");
@@ -113,7 +127,7 @@ let isRunning = false;
 let hasStarted = false;
 let currentModeKey = loadModeKey();
 let currentVoiceKey = loadVoiceKey();
-let modeSelectionComplete = loadModeSelectionComplete();
+let modeSelectionComplete = true;
 let phaseIndex = 0;
 let secondsLeft = getCurrentPhases()[0].duration;
 let phaseStartedAt = 0;
@@ -254,9 +268,9 @@ function loadVoiceKey() {
 
 function loadModeSelectionComplete() {
   try {
-    return window.sessionStorage.getItem(MODE_PICKED_KEY) === "1";
+    return window.sessionStorage.getItem(MODE_PICKED_KEY) !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -383,7 +397,7 @@ function cancelSpeech() {
 }
 
 function speakPhase(phase) {
-  if (!phase || !canSpeak()) {
+  if (!phase || currentVoiceKey === "mute" || !canSpeak()) {
     return;
   }
 
@@ -472,6 +486,13 @@ function getCurrentCycleOffsetSeconds() {
 }
 
 async function startBackgroundAudio() {
+  if (currentVoiceKey === "mute") {
+    backgroundAudioRunning = false;
+    backgroundAudioError = "";
+    render();
+    return false;
+  }
+
   try {
     const audio = prepareBackgroundAudio();
     const cycleOffset = getCurrentCycleOffsetSeconds();
@@ -501,7 +522,7 @@ async function startBackgroundAudio() {
     return true;
   } catch {
     backgroundAudioRunning = false;
-    backgroundAudioError = "iPhone 锁屏节奏音未能启动，请确认已通过页面按钮开始";
+    backgroundAudioError = "微信内提示音未能启动，请再次点击开始";
     render();
     return false;
   }
@@ -526,8 +547,8 @@ function stopBackgroundAudio({ reset = false } = {}) {
 }
 
 function getAudioStatusText() {
-  if (!modeSelectionComplete) {
-    return "iPhone 锁屏播放：选择模式后，点击开始启用收紧/放松语音";
+  if (currentVoiceKey === "mute") {
+    return "提示音已关闭";
   }
 
   if (backgroundAudioError) {
@@ -535,14 +556,14 @@ function getAudioStatusText() {
   }
 
   if (isRunning && backgroundAudioRunning) {
-    return "iPhone 锁屏播放已启用：锁屏后收紧/放松语音会继续播放";
+    return "提示音已开启：微信切到后台或锁屏时可能受系统限制";
   }
 
   if (isRunning) {
-    return "正在启动 iPhone 锁屏语音播报";
+    return "正在启动微信内提示音";
   }
 
-  return "iPhone 锁屏播放：开始后启用收紧/放松语音，退出页面后停止";
+  return "微信内播放：点击开始后启用收紧/放松提示音";
 }
 
 function updateMediaSession() {
@@ -743,11 +764,19 @@ function formatMonthLabel(monthKey) {
 }
 
 function formatCalendarMinutes(seconds) {
-  return `${Math.max(1, Math.ceil(seconds / 60))} 分钟`;
+  if (seconds < 60) {
+    return `${Math.max(1, Math.floor(seconds))} 秒`;
+  }
+
+  return `${Math.ceil(seconds / 60)} 分钟`;
 }
 
 function formatCalendarMinutesShort(seconds) {
-  return `${Math.max(1, Math.ceil(seconds / 60))} m`;
+  if (seconds < 60) {
+    return "<1分";
+  }
+
+  return `${Math.ceil(seconds / 60)}分`;
 }
 
 function getMonthCells(monthKey, records) {
@@ -844,6 +873,10 @@ function updateVoiceSelect() {
 }
 
 function updateModeHero() {
+  if (!modeHero || !modeHeroStatus) {
+    return;
+  }
+
   modeHero.hidden = modeSelectionComplete;
 
   if (!modeSelectionComplete) {
@@ -923,19 +956,19 @@ function getSyncMessage() {
 
   if (remoteState === "syncing") {
     return pendingTotal > 0
-      ? `Cloudflare 同步中，待上传 ${formatDuration(pendingTotal)}`
-      : "Cloudflare 同步中";
+      ? `正在同步，待上传 ${formatDuration(pendingTotal)}`
+      : "正在同步";
   }
 
   if (pendingTotal > 0) {
-    return `Cloudflare 暂未同步，待上传 ${formatDuration(pendingTotal)}`;
+    return `已保存在本机，联网后同步 ${formatDuration(pendingTotal)}`;
   }
 
   if (remoteState === "synced") {
-    return "Cloudflare 已同步";
+    return "数据已同步";
   }
 
-  return "Cloudflare 未连接，当前使用本机缓存";
+  return "数据已保存在本机";
 }
 
 function isCheckedIn(seconds) {
@@ -952,30 +985,44 @@ function getCheckInStatusText(seconds) {
 
 function getTodaySummaryText(summary) {
   if (isCheckedIn(summary.todaySeconds)) {
-    return `今天已打卡 ${formatDuration(summary.todaySeconds)}，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
+    return `今天已打卡 ${formatDuration(summary.todaySeconds)}，打卡累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
   }
 
   if (summary.todaySeconds > 0) {
-    return `今天已练习 ${formatDuration(summary.todaySeconds)}，未满 10 分钟，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
+    return `今天已练习 ${formatDuration(summary.todaySeconds)}，打卡还差 ${formatDuration(CHECK_IN_SECONDS - summary.todaySeconds)}`;
   }
 
-  return `今天还没开始，累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
+  return `今天还没开始，打卡累计 ${summary.totalDays} 天 / ${formatDuration(summary.totalSeconds)}`;
+}
+
+function updateCheckInProgress(todaySeconds) {
+  const progress = Math.min(1, Math.max(0, todaySeconds / CHECK_IN_SECONDS));
+  const remaining = Math.max(0, CHECK_IN_SECONDS - todaySeconds);
+
+  if (checkInProgressText) {
+    checkInProgressText.textContent = `${formatDuration(todaySeconds)} / 10 分钟`;
+  }
+
+  if (checkInProgressFill) {
+    checkInProgressFill.style.width = `${(progress * 100).toFixed(1)}%`;
+  }
+
+  if (checkInRemainingText) {
+    checkInRemainingText.textContent = remaining > 0
+      ? `距离打卡还差 ${formatDuration(remaining)}`
+      : "今日打卡已完成";
+  }
 }
 
 function render() {
   const currentMode = getCurrentMode();
   const currentPhase = getCurrentPhases()[phaseIndex];
   const summary = buildSummary();
-  currentModeBadge.textContent = modeSelectionComplete ? currentMode.name : "待选模式";
+  currentModeBadge.textContent = currentMode.name;
 
-  modeDescription.textContent = modeSelectionComplete
-    ? "跟着倒计时和脉冲练习，系统会自动记录练习时间。"
-    : "先选择普通模式或快速模式，再开始训练。";
+  modeDescription.textContent = "默认普通模式，打开微信后可直接开始。";
 
-  if (!modeSelectionComplete) {
-    phaseName.textContent = "先选模式";
-    phaseHint.textContent = "普通模式 5 秒收紧 / 5 秒放松，快速模式 1 秒收紧 / 2 秒放松";
-  } else if (!hasStarted) {
+  if (!hasStarted) {
     phaseName.textContent = "准备开始";
     phaseHint.textContent = getStartHint();
   } else if (isRunning) {
@@ -986,7 +1033,7 @@ function render() {
     phaseHint.textContent = "点击继续，从当前秒数接着练习";
   }
 
-  countdown.textContent = modeSelectionComplete ? String(secondsLeft) : "--";
+  countdown.textContent = String(secondsLeft);
   elapsedTime.textContent = formatDuration(elapsed);
   if (audioStatus) {
     audioStatus.textContent = getAudioStatusText();
@@ -997,6 +1044,7 @@ function render() {
   totalCount.textContent = formatDuration(summary.totalSeconds);
   summaryText.textContent = getTodaySummaryText(summary);
   syncStatus.textContent = getSyncMessage();
+  updateCheckInProgress(summary.todaySeconds);
   renderHistory();
   updateRhythm();
   updateModeSwitcher();
@@ -1004,11 +1052,12 @@ function render() {
   updateModeHero();
   updateTrainingLayout();
   updatePulseGraph();
-  startButton.disabled = isRunning || !modeSelectionComplete;
+  startButton.disabled = isRunning;
   pauseButton.disabled = !isRunning;
-  startButton.textContent = modeSelectionComplete
-    ? (hasStarted ? "继续" : "开始")
-    : "先选模式";
+  if (endButton) {
+    endButton.disabled = !hasStarted;
+  }
+  startButton.textContent = hasStarted ? "继续" : "开始";
 }
 
 async function requestStats(url, options = {}) {
@@ -1303,7 +1352,19 @@ function switchVoice(nextVoiceKey) {
 
   currentVoiceKey = nextVoiceKey;
   window.localStorage.setItem(VOICE_KEY, currentVoiceKey);
+
+  if (currentVoiceKey === "mute") {
+    stopBackgroundAudio();
+    cancelSpeech();
+    render();
+    return;
+  }
+
   const hadVoices = loadBrowserSpeechVoices().length > 0;
+
+  if (isRunning) {
+    void startBackgroundAudio();
+  }
 
   if (isRunning && !backgroundAudioRunning) {
     speakPhase(getCurrentPhases()[phaseIndex]);
@@ -1332,6 +1393,9 @@ startButton.addEventListener("click", () => {
   void startTimer();
 });
 pauseButton.addEventListener("click", pauseTimer);
+if (endButton) {
+  endButton.addEventListener("click", restartCurrentSession);
+}
 if (voiceSelect) {
   voiceSelect.addEventListener("change", () => {
     switchVoice(voiceSelect.value);
