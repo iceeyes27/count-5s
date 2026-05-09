@@ -147,6 +147,8 @@ let backgroundAudioModeKey = "";
 let backgroundAudioRunning = false;
 let backgroundAudioError = "";
 let stoppingBackgroundAudio = false;
+let immediateCuePhaseIndex = null;
+let initialCueTimeoutId = null;
 
 function getTodayDate() {
   return getDateKeyForTime(Date.now());
@@ -396,6 +398,13 @@ function cancelSpeech() {
   }
 }
 
+function cancelInitialPhaseCue() {
+  if (initialCueTimeoutId !== null) {
+    window.clearTimeout(initialCueTimeoutId);
+    initialCueTimeoutId = null;
+  }
+}
+
 function speakPhase(phase) {
   if (!phase || currentVoiceKey === "mute" || !canSpeak()) {
     return;
@@ -432,6 +441,7 @@ function ensureBackgroundAudioElement() {
   backgroundAudio.setAttribute("playsinline", "");
   backgroundAudio.setAttribute("webkit-playsinline", "");
   backgroundAudio.addEventListener("play", () => {
+    cancelInitialPhaseCue();
     backgroundAudioRunning = true;
     backgroundAudioError = "";
     render();
@@ -495,9 +505,9 @@ async function startBackgroundAudio() {
 
   try {
     const audio = prepareBackgroundAudio();
-    const cycleOffset = getCurrentCycleOffsetSeconds();
     const setAudioOffset = () => {
       try {
+        const cycleOffset = getCurrentCycleOffsetSeconds();
         if (Number.isFinite(audio.duration) && audio.duration > 0) {
           audio.currentTime = Math.min(cycleOffset, Math.max(0, audio.duration - 0.05));
         } else if (audio.readyState > 0) {
@@ -515,6 +525,7 @@ async function startBackgroundAudio() {
     }
 
     await audio.play();
+    setAudioOffset();
     backgroundAudioRunning = true;
     backgroundAudioError = "";
     render();
@@ -1255,6 +1266,32 @@ function announcePhaseIfNeeded(previousPhaseIndex) {
   speakPhase(getCurrentPhases()[phaseIndex]);
 }
 
+function speakInitialPhaseCue() {
+  if (currentVoiceKey === "mute") {
+    immediateCuePhaseIndex = null;
+    return;
+  }
+
+  immediateCuePhaseIndex = phaseIndex;
+  speakPhase(getCurrentPhases()[phaseIndex]);
+}
+
+function scheduleInitialPhaseCue() {
+  cancelInitialPhaseCue();
+  immediateCuePhaseIndex = null;
+
+  if (currentVoiceKey === "mute") {
+    return;
+  }
+
+  initialCueTimeoutId = window.setTimeout(() => {
+    initialCueTimeoutId = null;
+    if (isRunning && !backgroundAudioRunning) {
+      speakInitialPhaseCue();
+    }
+  }, 350);
+}
+
 function tick() {
   if (!isRunning) {
     return;
@@ -1276,19 +1313,25 @@ async function startTimer() {
   lastAccountingAtMs = Date.now();
   phaseStartedAt = performance.now() - pausedPhaseElapsedMs;
   render();
-  const hasBackgroundAudio = await startBackgroundAudio();
-  if (!isRunning) {
-    stopBackgroundAudio({ reset: true });
-    return;
-  }
-  if (!hasBackgroundAudio) {
-    speakPhase(getCurrentPhases()[phaseIndex]);
-  }
+  scheduleInitialPhaseCue();
   startPulseAnimation();
   if (timerId !== null) {
     window.clearInterval(timerId);
   }
   timerId = window.setInterval(tick, 1000);
+
+  const hasBackgroundAudio = await startBackgroundAudio();
+  if (!isRunning) {
+    cancelInitialPhaseCue();
+    immediateCuePhaseIndex = null;
+    stopBackgroundAudio({ reset: true });
+    return;
+  }
+  cancelInitialPhaseCue();
+  if (!hasBackgroundAudio && immediateCuePhaseIndex !== phaseIndex) {
+    speakPhase(getCurrentPhases()[phaseIndex]);
+  }
+  immediateCuePhaseIndex = null;
 }
 
 function pauseTimer() {
@@ -1305,6 +1348,8 @@ function pauseTimer() {
   stopPulseAnimation();
   stopBackgroundAudio();
   cancelSpeech();
+  cancelInitialPhaseCue();
+  immediateCuePhaseIndex = null;
   void flushAllPendingDates();
   render();
 }
@@ -1317,6 +1362,8 @@ function restartCurrentSession() {
   stopPulseAnimation();
   stopBackgroundAudio({ reset: true });
   cancelSpeech();
+  cancelInitialPhaseCue();
+  immediateCuePhaseIndex = null;
   void flushAllPendingDates();
   phaseIndex = 0;
   secondsLeft = getCurrentPhases()[0].duration;
