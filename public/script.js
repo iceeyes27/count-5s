@@ -9,6 +9,9 @@ const MODE_PICKED_KEY = "kegel-mode-picked";
 const VOICE_KEY = "kegel-speech-voice";
 const LEGACY_CYCLE_SECONDS = 10;
 const CHECK_IN_SECONDS = 10 * 60;
+const BACKGROUND_AUDIO_SYNC_INTERVAL_MS = 3000;
+const BACKGROUND_AUDIO_DRIFT_TOLERANCE_SECONDS = 0.2;
+const BACKGROUND_AUDIO_EDGE_PADDING_SECONDS = 0.03;
 
 const MODES = {
   normal: {
@@ -149,6 +152,7 @@ let backgroundAudioError = "";
 let stoppingBackgroundAudio = false;
 let immediateCuePhaseIndex = null;
 let suppressedBackgroundPhaseIndex = null;
+let lastBackgroundAudioSyncAtMs = 0;
 
 function getTodayDate() {
   return getDateKeyForTime(Date.now());
@@ -435,10 +439,17 @@ function ensureBackgroundAudioElement() {
   backgroundAudio.setAttribute("playsinline", "");
   backgroundAudio.setAttribute("webkit-playsinline", "");
   backgroundAudio.addEventListener("play", () => {
+    syncBackgroundAudioToClock({ force: true, seek: true });
     updateBackgroundAudioVolume();
     backgroundAudioRunning = true;
     backgroundAudioError = "";
     render();
+  });
+  backgroundAudio.addEventListener("playing", () => {
+    syncBackgroundAudioToClock({ force: true });
+  });
+  backgroundAudio.addEventListener("timeupdate", () => {
+    syncBackgroundAudioToClock();
   });
   backgroundAudio.addEventListener("pause", () => {
     backgroundAudioRunning = false;
@@ -467,6 +478,7 @@ function prepareBackgroundAudio() {
 
   backgroundAudioSrc = nextAudioSrc;
   backgroundAudioModeKey = currentModeKey;
+  lastBackgroundAudioSyncAtMs = 0;
   audio.src = backgroundAudioSrc;
   audio.load();
   return audio;
@@ -518,16 +530,7 @@ async function startBackgroundAudio() {
   try {
     const audio = prepareBackgroundAudio();
     const setAudioOffset = () => {
-      try {
-        const cycleOffset = getCurrentCycleOffsetSeconds();
-        if (Number.isFinite(audio.duration) && audio.duration > 0) {
-          audio.currentTime = Math.min(cycleOffset, Math.max(0, audio.duration - 0.05));
-        } else if (audio.readyState > 0) {
-          audio.currentTime = cycleOffset;
-        }
-      } catch {
-        return;
-      }
+      seekBackgroundAudioToClock(audio);
     };
 
     if (audio.readyState > 0) {
@@ -538,7 +541,7 @@ async function startBackgroundAudio() {
 
     updateBackgroundAudioVolume();
     await audio.play();
-    setAudioOffset();
+    syncBackgroundAudioToClock({ force: true, seek: true });
     updateBackgroundAudioVolume();
     backgroundAudioRunning = true;
     backgroundAudioError = "";
@@ -565,6 +568,7 @@ function stopBackgroundAudio({ reset = false } = {}) {
     backgroundAudio.currentTime = 0;
   }
   backgroundAudioRunning = false;
+  lastBackgroundAudioSyncAtMs = 0;
   window.setTimeout(() => {
     stoppingBackgroundAudio = false;
   }, 0);
@@ -589,6 +593,93 @@ function getAudioStatusText() {
   }
 
   return "微信内播放：点击开始后启用收紧/放松提示音";
+}
+
+function getLoopingAudioDuration(audio) {
+  const audioDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
+  const cycleDuration = getCycleDurationSeconds();
+
+  if (audioDuration > 0) {
+    return audioDuration;
+  }
+
+  return cycleDuration;
+}
+
+function getBackgroundAudioTargetTime(audio) {
+  const loopDuration = getLoopingAudioDuration(audio);
+  if (loopDuration <= 0) {
+    return 0;
+  }
+
+  const cycleOffset = getCurrentCycleOffsetSeconds();
+  const targetTime = cycleOffset % loopDuration;
+  const latestSafeTime = Math.max(0, loopDuration - BACKGROUND_AUDIO_EDGE_PADDING_SECONDS);
+  return Math.min(targetTime, latestSafeTime);
+}
+
+function seekBackgroundAudioToClock(audio = backgroundAudio) {
+  if (!audio || audio.readyState === 0) {
+    return false;
+  }
+
+  try {
+    audio.currentTime = getBackgroundAudioTargetTime(audio);
+    lastBackgroundAudioSyncAtMs = performance.now();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getLoopingDriftSeconds(actualTime, targetTime, loopDuration) {
+  if (loopDuration <= 0) {
+    return actualTime - targetTime;
+  }
+
+  let drift = actualTime - targetTime;
+  if (drift > loopDuration / 2) {
+    drift -= loopDuration;
+  } else if (drift < -loopDuration / 2) {
+    drift += loopDuration;
+  }
+  return drift;
+}
+
+function syncBackgroundAudioToClock({ force = false, seek = false } = {}) {
+  if (
+    !backgroundAudio ||
+    currentVoiceKey === "mute" ||
+    !isRunning ||
+    backgroundAudio.paused ||
+    backgroundAudio.readyState === 0
+  ) {
+    return false;
+  }
+
+  const now = performance.now();
+  if (!force && now - lastBackgroundAudioSyncAtMs < BACKGROUND_AUDIO_SYNC_INTERVAL_MS) {
+    return false;
+  }
+
+  const loopDuration = getLoopingAudioDuration(backgroundAudio);
+  if (loopDuration <= 0) {
+    return false;
+  }
+
+  lastBackgroundAudioSyncAtMs = now;
+  const targetTime = getBackgroundAudioTargetTime(backgroundAudio);
+  const driftSeconds = getLoopingDriftSeconds(backgroundAudio.currentTime, targetTime, loopDuration);
+
+  if (!seek && Math.abs(driftSeconds) <= BACKGROUND_AUDIO_DRIFT_TOLERANCE_SECONDS) {
+    return false;
+  }
+
+  try {
+    return seekBackgroundAudioToClock();
+  } catch {
+    return false;
+  }
 }
 
 function updateMediaSession() {
@@ -1306,6 +1397,7 @@ function tick() {
 
   const previousPhaseIndex = phaseIndex;
   accountElapsedToNow();
+  syncBackgroundAudioToClock({ force: previousPhaseIndex !== phaseIndex });
   updateBackgroundAudioVolume();
   announcePhaseIfNeeded(previousPhaseIndex);
   render();
@@ -1441,6 +1533,7 @@ function refreshRunningState() {
 
   const previousPhaseIndex = phaseIndex;
   accountElapsedToNow();
+  syncBackgroundAudioToClock({ force: true });
   announcePhaseIfNeeded(previousPhaseIndex);
   render();
 }
