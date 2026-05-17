@@ -12,6 +12,7 @@ const CHECK_IN_SECONDS = 10 * 60;
 const BACKGROUND_AUDIO_SYNC_INTERVAL_MS = 3000;
 const BACKGROUND_AUDIO_DRIFT_TOLERANCE_SECONDS = 0.2;
 const BACKGROUND_AUDIO_EDGE_PADDING_SECONDS = 0.03;
+const BACKGROUND_AUDIO_CUE_GUARD_SECONDS = 1;
 
 const MODES = {
   normal: {
@@ -646,6 +647,29 @@ function getLoopingDriftSeconds(actualTime, targetTime, loopDuration) {
   return drift;
 }
 
+function isInBackgroundAudioCueWindow(timeSeconds, loopDuration) {
+  if (loopDuration <= 0) {
+    return false;
+  }
+
+  const normalizedTime = ((timeSeconds % loopDuration) + loopDuration) % loopDuration;
+  const phases = getCurrentPhases();
+  let cueStartsAt = 0;
+
+  for (const phase of phases) {
+    const windowStart = cueStartsAt;
+    const windowEnd = Math.min(loopDuration, cueStartsAt + BACKGROUND_AUDIO_CUE_GUARD_SECONDS);
+
+    if (normalizedTime >= windowStart && normalizedTime < windowEnd) {
+      return true;
+    }
+
+    cueStartsAt += phase.duration;
+  }
+
+  return normalizedTime >= loopDuration - BACKGROUND_AUDIO_EDGE_PADDING_SECONDS;
+}
+
 function syncBackgroundAudioToClock({ force = false, seek = false } = {}) {
   if (
     !backgroundAudio ||
@@ -667,9 +691,20 @@ function syncBackgroundAudioToClock({ force = false, seek = false } = {}) {
     return false;
   }
 
-  lastBackgroundAudioSyncAtMs = now;
   const targetTime = getBackgroundAudioTargetTime(backgroundAudio);
   const driftSeconds = getLoopingDriftSeconds(backgroundAudio.currentTime, targetTime, loopDuration);
+
+  if (
+    !seek &&
+    (
+      isInBackgroundAudioCueWindow(backgroundAudio.currentTime, loopDuration) ||
+      isInBackgroundAudioCueWindow(targetTime, loopDuration)
+    )
+  ) {
+    return false;
+  }
+
+  lastBackgroundAudioSyncAtMs = now;
 
   if (!seek && Math.abs(driftSeconds) <= BACKGROUND_AUDIO_DRIFT_TOLERANCE_SECONDS) {
     return false;
