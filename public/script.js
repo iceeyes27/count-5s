@@ -9,10 +9,8 @@ const MODE_PICKED_KEY = "kegel-mode-picked";
 const VOICE_KEY = "kegel-speech-voice";
 const LEGACY_CYCLE_SECONDS = 10;
 const CHECK_IN_SECONDS = 10 * 60;
-const BACKGROUND_AUDIO_SYNC_INTERVAL_MS = 3000;
-const BACKGROUND_AUDIO_DRIFT_TOLERANCE_SECONDS = 0.2;
-const BACKGROUND_AUDIO_EDGE_PADDING_SECONDS = 0.03;
-const BACKGROUND_AUDIO_CUE_GUARD_SECONDS = 1;
+const AUDIO_ASSET_VERSION = "20260518-audio-clock";
+const TIMER_RENDER_INTERVAL_MS = 250;
 
 const MODES = {
   normal: {
@@ -134,10 +132,11 @@ let currentVoiceKey = loadVoiceKey();
 let modeSelectionComplete = true;
 let phaseIndex = 0;
 let secondsLeft = getCurrentPhases()[0].duration;
-let phaseStartedAt = 0;
-let pausedPhaseElapsedMs = 0;
 let elapsed = 0;
-let lastAccountingAtMs = 0;
+let lastAccountedElapsed = 0;
+let lastAccountedAtWallMs = 0;
+let fallbackStartedAtMs = 0;
+let fallbackStartedElapsed = 0;
 let dailyCache = loadSecondsCache();
 let pendingSync = loadPendingSeconds();
 let deviceId = loadDeviceId();
@@ -151,9 +150,8 @@ let backgroundAudioModeKey = "";
 let backgroundAudioRunning = false;
 let backgroundAudioError = "";
 let stoppingBackgroundAudio = false;
-let immediateCuePhaseIndex = null;
-let suppressedBackgroundPhaseIndex = null;
-let lastBackgroundAudioSyncAtMs = 0;
+let backgroundAudioOffsetSeconds = 0;
+let lastBackgroundAudioTime = 0;
 
 function getTodayDate() {
   return getDateKeyForTime(Date.now());
@@ -440,17 +438,23 @@ function ensureBackgroundAudioElement() {
   backgroundAudio.setAttribute("playsinline", "");
   backgroundAudio.setAttribute("webkit-playsinline", "");
   backgroundAudio.addEventListener("play", () => {
-    syncBackgroundAudioToClock({ force: true, seek: true });
-    updateBackgroundAudioVolume();
     backgroundAudioRunning = true;
     backgroundAudioError = "";
+    updateBackgroundAudioClockOffset();
+    accountElapsedToNow();
     render();
   });
   backgroundAudio.addEventListener("playing", () => {
-    syncBackgroundAudioToClock({ force: true });
+    backgroundAudioRunning = true;
+    backgroundAudioError = "";
+    updateBackgroundAudioClockOffset();
+    accountElapsedToNow();
+    render();
   });
   backgroundAudio.addEventListener("timeupdate", () => {
-    syncBackgroundAudioToClock();
+    updateBackgroundAudioClockOffset();
+    accountElapsedToNow();
+    render();
   });
   backgroundAudio.addEventListener("pause", () => {
     backgroundAudioRunning = false;
@@ -471,7 +475,7 @@ function ensureBackgroundAudioElement() {
 
 function prepareBackgroundAudio() {
   const audio = ensureBackgroundAudioElement();
-  const nextAudioSrc = `./audio/kegel-${currentModeKey}.m4a`;
+  const nextAudioSrc = `./audio/kegel-${currentModeKey}.m4a?v=${AUDIO_ASSET_VERSION}`;
 
   if (backgroundAudioModeKey === currentModeKey && backgroundAudioSrc === nextAudioSrc) {
     return audio;
@@ -479,7 +483,8 @@ function prepareBackgroundAudio() {
 
   backgroundAudioSrc = nextAudioSrc;
   backgroundAudioModeKey = currentModeKey;
-  lastBackgroundAudioSyncAtMs = 0;
+  backgroundAudioOffsetSeconds = 0;
+  lastBackgroundAudioTime = 0;
   audio.src = backgroundAudioSrc;
   audio.load();
   return audio;
@@ -490,34 +495,75 @@ function updateBackgroundAudioVolume() {
     return;
   }
 
-  if (
-    isRunning &&
-    suppressedBackgroundPhaseIndex !== null &&
-    phaseIndex === suppressedBackgroundPhaseIndex
-  ) {
-    backgroundAudio.volume = 0;
-    return;
-  }
-
-  suppressedBackgroundPhaseIndex = null;
   backgroundAudio.volume = 1;
 }
 
-function getPreciseElapsedSeconds() {
-  if (!isRunning || lastAccountingAtMs === 0) {
-    return elapsed;
-  }
-
-  return elapsed + Math.max(0, Date.now() - lastAccountingAtMs) / 1000;
-}
-
-function getCurrentCycleOffsetSeconds() {
-  const cycleDuration = getCycleDurationSeconds();
-  if (cycleDuration <= 0) {
+function getBackgroundAudioDuration(audio = backgroundAudio) {
+  if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) {
     return 0;
   }
 
-  return getPreciseElapsedSeconds() % cycleDuration;
+  return audio.duration;
+}
+
+function updateBackgroundAudioClockOffset() {
+  if (!backgroundAudio || backgroundAudio.readyState === 0) {
+    return;
+  }
+
+  const currentTime = backgroundAudio.currentTime || 0;
+  const duration = getBackgroundAudioDuration(backgroundAudio);
+
+  if (duration > 0 && lastBackgroundAudioTime - currentTime > duration / 2) {
+    backgroundAudioOffsetSeconds += duration;
+  }
+
+  lastBackgroundAudioTime = currentTime;
+}
+
+function isBackgroundAudioClockActive() {
+  return (
+    currentVoiceKey !== "mute" &&
+    backgroundAudioRunning &&
+    backgroundAudio &&
+    !backgroundAudio.paused &&
+    backgroundAudio.readyState > 0
+  );
+}
+
+function getPracticeElapsedSeconds() {
+  if (isBackgroundAudioClockActive()) {
+    updateBackgroundAudioClockOffset();
+    return Math.max(elapsed, backgroundAudioOffsetSeconds + (backgroundAudio.currentTime || 0));
+  }
+
+  if (isRunning && fallbackStartedAtMs > 0) {
+    return fallbackStartedElapsed + Math.max(0, Date.now() - fallbackStartedAtMs) / 1000;
+  }
+
+  return elapsed;
+}
+
+function setBackgroundAudioPositionFromElapsed(audio = backgroundAudio) {
+  if (!audio || audio.readyState === 0) {
+    backgroundAudioOffsetSeconds = elapsed;
+    lastBackgroundAudioTime = 0;
+    return false;
+  }
+
+  const duration = getBackgroundAudioDuration(audio);
+  const targetTime = duration > 0 ? elapsed % duration : 0;
+
+  try {
+    audio.currentTime = targetTime;
+    backgroundAudioOffsetSeconds = elapsed - targetTime;
+    lastBackgroundAudioTime = targetTime;
+    return true;
+  } catch {
+    backgroundAudioOffsetSeconds = elapsed;
+    lastBackgroundAudioTime = 0;
+    return false;
+  }
 }
 
 async function startBackgroundAudio() {
@@ -530,22 +576,24 @@ async function startBackgroundAudio() {
 
   try {
     const audio = prepareBackgroundAudio();
-    const setAudioOffset = () => {
-      seekBackgroundAudioToClock(audio);
+    const setAudioPosition = () => {
+      setBackgroundAudioPositionFromElapsed(audio);
     };
 
     if (audio.readyState > 0) {
-      setAudioOffset();
+      setAudioPosition();
     } else {
-      audio.addEventListener("loadedmetadata", setAudioOffset, { once: true });
+      audio.addEventListener("loadedmetadata", setAudioPosition, { once: true });
     }
 
     updateBackgroundAudioVolume();
     await audio.play();
-    syncBackgroundAudioToClock({ force: true, seek: true });
+    setBackgroundAudioPositionFromElapsed(audio);
     updateBackgroundAudioVolume();
     backgroundAudioRunning = true;
+    fallbackStartedAtMs = 0;
     backgroundAudioError = "";
+    accountElapsedToNow();
     render();
     updateMediaSession();
     return true;
@@ -567,9 +615,10 @@ function stopBackgroundAudio({ reset = false } = {}) {
   backgroundAudio.pause();
   if (reset) {
     backgroundAudio.currentTime = 0;
+    backgroundAudioOffsetSeconds = 0;
+    lastBackgroundAudioTime = 0;
   }
   backgroundAudioRunning = false;
-  lastBackgroundAudioSyncAtMs = 0;
   window.setTimeout(() => {
     stoppingBackgroundAudio = false;
   }, 0);
@@ -586,7 +635,7 @@ function getAudioStatusText() {
   }
 
   if (isRunning && backgroundAudioRunning) {
-    return "提示音已开启：微信切到后台或锁屏时可能受系统限制";
+    return "提示音已开启：页面计时跟随音频进度";
   }
 
   if (isRunning) {
@@ -594,127 +643,6 @@ function getAudioStatusText() {
   }
 
   return "微信内播放：点击开始后启用收紧/放松提示音";
-}
-
-function getLoopingAudioDuration(audio) {
-  const audioDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
-  const cycleDuration = getCycleDurationSeconds();
-
-  if (audioDuration > 0) {
-    return audioDuration;
-  }
-
-  return cycleDuration;
-}
-
-function getBackgroundAudioTargetTime(audio) {
-  const loopDuration = getLoopingAudioDuration(audio);
-  if (loopDuration <= 0) {
-    return 0;
-  }
-
-  const cycleOffset = getCurrentCycleOffsetSeconds();
-  const targetTime = cycleOffset % loopDuration;
-  const latestSafeTime = Math.max(0, loopDuration - BACKGROUND_AUDIO_EDGE_PADDING_SECONDS);
-  return Math.min(targetTime, latestSafeTime);
-}
-
-function seekBackgroundAudioToClock(audio = backgroundAudio) {
-  if (!audio || audio.readyState === 0) {
-    return false;
-  }
-
-  try {
-    audio.currentTime = getBackgroundAudioTargetTime(audio);
-    lastBackgroundAudioSyncAtMs = performance.now();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getLoopingDriftSeconds(actualTime, targetTime, loopDuration) {
-  if (loopDuration <= 0) {
-    return actualTime - targetTime;
-  }
-
-  let drift = actualTime - targetTime;
-  if (drift > loopDuration / 2) {
-    drift -= loopDuration;
-  } else if (drift < -loopDuration / 2) {
-    drift += loopDuration;
-  }
-  return drift;
-}
-
-function isInBackgroundAudioCueWindow(timeSeconds, loopDuration) {
-  if (loopDuration <= 0) {
-    return false;
-  }
-
-  const normalizedTime = ((timeSeconds % loopDuration) + loopDuration) % loopDuration;
-  const phases = getCurrentPhases();
-  let cueStartsAt = 0;
-
-  for (const phase of phases) {
-    const windowStart = cueStartsAt;
-    const windowEnd = Math.min(loopDuration, cueStartsAt + BACKGROUND_AUDIO_CUE_GUARD_SECONDS);
-
-    if (normalizedTime >= windowStart && normalizedTime < windowEnd) {
-      return true;
-    }
-
-    cueStartsAt += phase.duration;
-  }
-
-  return normalizedTime >= loopDuration - BACKGROUND_AUDIO_EDGE_PADDING_SECONDS;
-}
-
-function syncBackgroundAudioToClock({ force = false, seek = false } = {}) {
-  if (
-    !backgroundAudio ||
-    currentVoiceKey === "mute" ||
-    !isRunning ||
-    backgroundAudio.paused ||
-    backgroundAudio.readyState === 0
-  ) {
-    return false;
-  }
-
-  const now = performance.now();
-  if (!force && now - lastBackgroundAudioSyncAtMs < BACKGROUND_AUDIO_SYNC_INTERVAL_MS) {
-    return false;
-  }
-
-  const loopDuration = getLoopingAudioDuration(backgroundAudio);
-  if (loopDuration <= 0) {
-    return false;
-  }
-
-  const targetTime = getBackgroundAudioTargetTime(backgroundAudio);
-  const driftSeconds = getLoopingDriftSeconds(backgroundAudio.currentTime, targetTime, loopDuration);
-
-  if (
-    !seek &&
-    (
-      isInBackgroundAudioCueWindow(backgroundAudio.currentTime, loopDuration) ||
-      isInBackgroundAudioCueWindow(targetTime, loopDuration)
-    )
-  ) {
-    return false;
-  }
-
-  lastBackgroundAudioSyncAtMs = now;
-
-  if (!seek && Math.abs(driftSeconds) <= BACKGROUND_AUDIO_DRIFT_TOLERANCE_SECONDS) {
-    return false;
-  }
-
-  try {
-    return seekBackgroundAudioToClock();
-  } catch {
-    return false;
-  }
 }
 
 function updateMediaSession() {
@@ -781,37 +709,34 @@ function getRecordSeconds(record) {
   return 0;
 }
 
-function getCurrentPhaseElapsedMs(now = performance.now()) {
+function getCurrentPhaseElapsedMs() {
   if (!hasStarted) {
     return 0;
   }
 
   const currentPhase = getCurrentPhases()[phaseIndex];
   const durationMs = currentPhase.duration * 1000;
+  const state = getPhaseStateFromElapsed(getPracticeElapsedSeconds());
 
-  if (!isRunning) {
-    return Math.min(durationMs, pausedPhaseElapsedMs);
-  }
-
-  return Math.min(durationMs, Math.max(0, now - phaseStartedAt));
+  return Math.min(durationMs, state.secondsIntoPhase * 1000);
 }
 
-function getCurrentPhaseProgress(now = performance.now()) {
+function getCurrentPhaseProgress() {
   const currentPhase = getCurrentPhases()[phaseIndex];
   if (!currentPhase) {
     return 0;
   }
 
-  return getCurrentPhaseElapsedMs(now) / (currentPhase.duration * 1000);
+  return getCurrentPhaseElapsedMs() / (currentPhase.duration * 1000);
 }
 
-function getCycleProgress(now = performance.now()) {
+function getCycleProgress() {
   const phases = getCurrentPhases();
   const totalDuration = phases.reduce((sum, phase) => sum + phase.duration, 0);
   const elapsedBeforePhase = phases
     .slice(0, phaseIndex)
     .reduce((sum, phase) => sum + phase.duration, 0);
-  const elapsedInCycle = elapsedBeforePhase + (getCurrentPhaseElapsedMs(now) / 1000);
+  const elapsedInCycle = elapsedBeforePhase + (getCurrentPhaseElapsedMs() / 1000);
 
   if (totalDuration === 0) {
     return 0;
@@ -1355,7 +1280,7 @@ function getPhaseStateFromElapsed(totalElapsedSeconds) {
       return {
         phaseIndex: index,
         secondsIntoPhase: cyclePosition,
-        secondsLeft: phase.duration - cyclePosition
+        secondsLeft: Math.max(1, Math.ceil(phase.duration - cyclePosition))
       };
     }
     cyclePosition -= phase.duration;
@@ -1368,33 +1293,52 @@ function getPhaseStateFromElapsed(totalElapsedSeconds) {
   };
 }
 
-function applyPhaseStateFromElapsed(now = performance.now()) {
-  const state = getPhaseStateFromElapsed(elapsed);
+function applyPhaseStateFromElapsed(totalElapsedSeconds = getPracticeElapsedSeconds()) {
+  const state = getPhaseStateFromElapsed(totalElapsedSeconds);
   phaseIndex = state.phaseIndex;
   secondsLeft = state.secondsLeft;
-
-  if (isRunning) {
-    phaseStartedAt = now - (state.secondsIntoPhase * 1000);
-  } else {
-    pausedPhaseElapsedMs = state.secondsIntoPhase * 1000;
-  }
 }
 
-function accountElapsedToNow(nowMs = Date.now()) {
-  if (!isRunning || lastAccountingAtMs === 0) {
+function startFallbackClock() {
+  fallbackStartedAtMs = Date.now();
+  fallbackStartedElapsed = elapsed;
+}
+
+function stopFallbackClock() {
+  fallbackStartedAtMs = 0;
+  fallbackStartedElapsed = elapsed;
+}
+
+function preparePracticeAccounting() {
+  lastAccountedElapsed = elapsed;
+  lastAccountedAtWallMs = Date.now();
+  if (currentVoiceKey === "mute") {
+    startFallbackClock();
+  } else {
+    stopFallbackClock();
+  }
+  applyPhaseStateFromElapsed(elapsed);
+}
+
+function accountElapsedToNow() {
+  if (!isRunning) {
     return 0;
   }
 
-  const deltaSeconds = Math.floor((nowMs - lastAccountingAtMs) / 1000);
+  const preciseElapsed = getPracticeElapsedSeconds();
+  const nextElapsed = Math.floor(preciseElapsed);
+  const deltaSeconds = nextElapsed - lastAccountedElapsed;
   if (deltaSeconds <= 0) {
+    applyPhaseStateFromElapsed(preciseElapsed);
     return 0;
   }
 
-  const accountedFromMs = lastAccountingAtMs;
-  lastAccountingAtMs += deltaSeconds * 1000;
-  elapsed += deltaSeconds;
+  const accountedFromMs = lastAccountedAtWallMs || Math.max(0, Date.now() - deltaSeconds * 1000);
+  lastAccountedAtWallMs = accountedFromMs + (deltaSeconds * 1000);
+  lastAccountedElapsed = nextElapsed;
+  elapsed = nextElapsed;
   addElapsedSeconds(accountedFromMs, deltaSeconds);
-  applyPhaseStateFromElapsed();
+  applyPhaseStateFromElapsed(preciseElapsed);
   return deltaSeconds;
 }
 
@@ -1406,25 +1350,6 @@ function announcePhaseIfNeeded(previousPhaseIndex) {
   speakPhase(getCurrentPhases()[phaseIndex]);
 }
 
-function speakInitialPhaseCue() {
-  if (currentVoiceKey === "mute") {
-    immediateCuePhaseIndex = null;
-    suppressedBackgroundPhaseIndex = null;
-    return false;
-  }
-
-  immediateCuePhaseIndex = phaseIndex;
-  if (speakPhase(getCurrentPhases()[phaseIndex])) {
-    suppressedBackgroundPhaseIndex = phaseIndex;
-    updateBackgroundAudioVolume();
-    return true;
-  }
-
-  immediateCuePhaseIndex = null;
-  suppressedBackgroundPhaseIndex = null;
-  return false;
-}
-
 function tick() {
   if (!isRunning) {
     return;
@@ -1432,7 +1357,6 @@ function tick() {
 
   const previousPhaseIndex = phaseIndex;
   accountElapsedToNow();
-  syncBackgroundAudioToClock({ force: previousPhaseIndex !== phaseIndex });
   updateBackgroundAudioVolume();
   announcePhaseIfNeeded(previousPhaseIndex);
   render();
@@ -1445,27 +1369,23 @@ async function startTimer() {
 
   hasStarted = true;
   isRunning = true;
-  lastAccountingAtMs = Date.now();
-  phaseStartedAt = performance.now() - pausedPhaseElapsedMs;
+  preparePracticeAccounting();
   render();
-  speakInitialPhaseCue();
   startPulseAnimation();
   if (timerId !== null) {
     window.clearInterval(timerId);
   }
-  timerId = window.setInterval(tick, 1000);
+  timerId = window.setInterval(tick, TIMER_RENDER_INTERVAL_MS);
 
   const hasBackgroundAudio = await startBackgroundAudio();
   if (!isRunning) {
-    immediateCuePhaseIndex = null;
-    suppressedBackgroundPhaseIndex = null;
     stopBackgroundAudio({ reset: true });
     return;
   }
-  if (!hasBackgroundAudio && immediateCuePhaseIndex !== phaseIndex) {
+  if (!hasBackgroundAudio) {
+    startFallbackClock();
     speakPhase(getCurrentPhases()[phaseIndex]);
   }
-  immediateCuePhaseIndex = null;
 }
 
 function pauseTimer() {
@@ -1474,35 +1394,33 @@ function pauseTimer() {
   }
 
   accountElapsedToNow();
-  pausedPhaseElapsedMs = getCurrentPhaseElapsedMs();
   isRunning = false;
-  lastAccountingAtMs = 0;
+  applyPhaseStateFromElapsed(elapsed);
+  lastAccountedAtWallMs = 0;
+  stopFallbackClock();
   window.clearInterval(timerId);
   timerId = null;
   stopPulseAnimation();
   stopBackgroundAudio();
   cancelSpeech();
-  immediateCuePhaseIndex = null;
-  suppressedBackgroundPhaseIndex = null;
   void flushAllPendingDates();
   render();
 }
 
 function restartCurrentSession() {
   isRunning = false;
-  lastAccountingAtMs = 0;
+  lastAccountedElapsed = 0;
+  lastAccountedAtWallMs = 0;
+  fallbackStartedAtMs = 0;
+  fallbackStartedElapsed = 0;
   window.clearInterval(timerId);
   timerId = null;
   stopPulseAnimation();
   stopBackgroundAudio({ reset: true });
   cancelSpeech();
-  immediateCuePhaseIndex = null;
-  suppressedBackgroundPhaseIndex = null;
   void flushAllPendingDates();
   phaseIndex = 0;
   secondsLeft = getCurrentPhases()[0].duration;
-  phaseStartedAt = 0;
-  pausedPhaseElapsedMs = 0;
   elapsed = 0;
   hasStarted = false;
   render();
@@ -1537,27 +1455,22 @@ function switchVoice(nextVoiceKey) {
   if (currentVoiceKey === "mute") {
     stopBackgroundAudio();
     cancelSpeech();
-    immediateCuePhaseIndex = null;
-    suppressedBackgroundPhaseIndex = null;
+    if (isRunning) {
+      startFallbackClock();
+    }
     render();
     return;
   }
 
-  const hadVoices = loadBrowserSpeechVoices().length > 0;
+  loadBrowserSpeechVoices();
 
   if (isRunning) {
-    void startBackgroundAudio();
-  }
-
-  if (isRunning && !backgroundAudioRunning) {
-    speakPhase(getCurrentPhases()[phaseIndex]);
-    if (!hadVoices) {
-      window.setTimeout(() => {
-        if (isRunning && !backgroundAudioRunning) {
-          speakPhase(getCurrentPhases()[phaseIndex]);
-        }
-      }, 250);
-    }
+    void startBackgroundAudio().then((hasBackgroundAudio) => {
+      if (!hasBackgroundAudio && isRunning) {
+        startFallbackClock();
+        speakPhase(getCurrentPhases()[phaseIndex]);
+      }
+    });
   }
 }
 
@@ -1568,7 +1481,6 @@ function refreshRunningState() {
 
   const previousPhaseIndex = phaseIndex;
   accountElapsedToNow();
-  syncBackgroundAudioToClock({ force: true });
   announcePhaseIfNeeded(previousPhaseIndex);
   render();
 }
