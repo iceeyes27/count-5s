@@ -1,0 +1,103 @@
+<view class="page">
+  <view class="hero">
+    <view>
+      <text class="eyebrow">Kegel Timer</text>
+      <text class="title">凯格尔运动计时器</text>
+      <text class="description">{{modeDescription}}</text>
+    </view>
+    <view class="mode-pill">{{modeName}}</view>
+  </view>
+
+  <view class="timer-card">
+    <text class="phase-label">当前阶段</text>
+    <text class="phase-name">{{phaseName}}</text>
+    <text class="countdown">{{countdownText}}</text>
+    <text class="phase-hint">{{phaseHint}}</text>
+
+    <view class="controls">
+      <button class="control primary" bindtap="startTimer">开始</button>
+      <button class="control" bindtap="pauseTimer">暂停</button>
+      <button class="control" bindtap="endSession">结束</button>
+    </view>
+
+    <view class="progress">
+      <view class="progress-row">
+        <text>今日打卡进度</text>
+        <text class="progress-strong">{{checkInProgressText}}</text>
+      </view>
+      <view class="progress-track">
+        <view class="progress-fill" style="width: {{progressPercent}}%;"></view>
+      </view>
+      <text class="progress-note">{{remainingText}}</text>
+    </view>
+  </view>
+
+  <view class="mode-card">
+    <view class="section-header">
+      <text class="section-title">训练模式</text>
+      <view
+        class="sound-toggle {{soundEnabled ? 'active' : ''}}"
+        role="switch"
+        aria-checked="{{soundEnabled}}"
+        bindtap="toggleSound"
+      >
+        <view class="sound-toggle-dot"></view>
+      </view>
+    </view>
+    <view class="mode-switch">
+      <button class="mode-button {{modeKey === 'normal' ? 'active' : ''}}" data-mode="normal" bindtap="switchMode">
+        <text>普通</text>
+        <text class="mode-small">5 秒收紧 / 5 秒放松</text>
+      </button>
+      <button class="mode-button {{modeKey === 'quick' ? 'active' : ''}}" data-mode="quick" bindtap="switchMode">
+        <text>快速</text>
+        <text class="mode-small">1 秒收紧 / 2 秒放松</text>
+      </button>
+    </view>
+    <text class="sound-note">本地提示音：{{soundEnabled ? '开启' : '关闭'}}</text>
+  </view>
+
+  <view class="stats">
+    <view class="stat-box">
+      <text class="stat-title">本次练习时间</text>
+      <text class="stat-value">{{elapsedText}}</text>
+    </view>
+    <view class="stat-box">
+      <text class="stat-title">今日累计时间</text>
+      <text class="stat-value">{{todayText}}</text>
+    </view>
+    <view class="stat-box">
+      <text class="stat-title">打卡状态</text>
+      <text class="stat-value">{{checkInStatus}}</text>
+    </view>
+    <view class="stat-box">
+      <text class="stat-title">已打卡天数</text>
+      <text class="stat-value">{{checkedDays}}</text>
+    </view>
+  </view>
+
+  <view class="summary-card">
+    <text class="section-title">打卡总览</text>
+    <text class="summary-text">{{summaryText}}</text>
+    <text class="storage-note">{{storagePolicyText}}</text>
+    <text class="storage-note">{{storageUsageText}}</text>
+    <view class="data-actions">
+      <button class="data-button primary" bindtap="exportData">导出数据</button>
+      <button class="data-button" bindtap="importData">导入数据</button>
+    </view>
+  </view>
+
+  <view class="history-card">
+    <text class="section-title">最近记录</text>
+    <view wx:if="{{history.length > 0}}" class="history-list">
+      <view wx:for="{{history}}" wx:key="date" class="history-row">
+        <text>{{item.date}}</text>
+        <view class="history-meta">
+          <text>{{item.durationText}}</text>
+          <text class="history-status">{{item.statusText}}</text>
+        </view>
+      </view>
+    </view>
+    <text wx:else class="empty-text">还没有练习记录</text>
+  </view>
+</view>

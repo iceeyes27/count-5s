@@ -1,0 +1,13 @@
+{
+  "pages": [
+    "pages/index/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "凯格尔计时器",
+    "navigationBarBackgroundColor": "#f5eadb",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f5eadb"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}
