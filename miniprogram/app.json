@@ -2,6 +2,9 @@
   "pages": [
     "pages/index/index"
   ],
+  "requiredBackgroundModes": [
+    "audio"
+  ],
   "window": {
     "navigationBarTitleText": "凯格尔计时器",
     "navigationBarBackgroundColor": "#f5eadb",

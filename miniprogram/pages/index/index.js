@@ -1,6 +1,10 @@
 const CHECK_IN_SECONDS = 10 * 60;
 const AUTOSAVE_INTERVAL_MS = 15 * 1000;
 const STORAGE_USAGE_WARN_RATIO = 0.7;
+const AUDIO_SYNC_INTERVAL_MS = 3000;
+const AUDIO_DRIFT_TOLERANCE_SECONDS = 0.15;
+const AUDIO_FORCE_SYNC_TOLERANCE_SECONDS = 0.05;
+const AUDIO_CUE_GUARD_SECONDS = 0.8;
 const STORAGE_KEYS = {
   config: "kegel-mini-config",
   legacyRecords: "kegel-mini-daily-seconds",
@@ -213,6 +217,7 @@ Page({
 
   timerId: null,
   audioContext: null,
+  lastAudioSyncAtMs: 0,
   monthlyEvents: {},
   dailySummaries: {},
   dirtyDailyYears: {},
@@ -238,6 +243,7 @@ Page({
   initRuntimeState() {
     this.timerId = null;
     this.audioContext = null;
+    this.lastAudioSyncAtMs = 0;
     this.monthlyEvents = {};
     this.dailySummaries = {};
     this.dirtyDailyYears = {};
@@ -268,7 +274,9 @@ Page({
     this.commitActiveSessionSnapshot(true);
     this.saveDirtyDailySummaries();
     this.stopTicker();
-    this.pauseAudio();
+    if (!this.isRunning) {
+      this.pauseAudio();
+    }
   },
 
   onUnload() {
@@ -671,6 +679,7 @@ Page({
   },
 
   updatePhaseFromClock() {
+    const previousPhaseIndex = this.phaseIndex;
     const mode = this.getCurrentMode();
     const now = Date.now();
     let phase = mode.phases[this.phaseIndex];
@@ -684,6 +693,12 @@ Page({
     }
 
     this.pausedPhaseElapsedMs = phaseElapsedMs;
+
+    if (previousPhaseIndex !== this.phaseIndex) {
+      this.syncAudioToCurrentPhase(true);
+    } else {
+      this.syncAudioToCurrentPhase(false);
+    }
   },
 
   switchMode(event) {
@@ -731,14 +746,14 @@ Page({
     }
 
     if (shouldSync) {
-      this.syncAudioToCurrentPhase();
+      this.syncAudioToCurrentPhase(true);
     }
 
     this.audioContext.play();
 
     if (shouldSync) {
       setTimeout(() => {
-        this.syncAudioToCurrentPhase();
+        this.syncAudioToCurrentPhase(true);
       }, 80);
     }
   },
@@ -747,6 +762,7 @@ Page({
     if (this.audioContext) {
       this.audioContext.pause();
     }
+    this.lastAudioSyncAtMs = 0;
   },
 
   stopAudio(shouldReset) {
@@ -756,24 +772,81 @@ Page({
         this.audioContext.seek(0);
       }
     }
+    this.lastAudioSyncAtMs = 0;
   },
 
-  syncAudioToCurrentPhase() {
-    if (!this.audioContext) {
-      return;
-    }
-
+  getAudioLoopDuration() {
     const mode = this.getCurrentMode();
-    const loopDuration = mode.phases.reduce((total, phase) => total + phase.duration, 0);
+    return mode.phases.reduce((total, phase) => total + phase.duration, 0);
+  },
+
+  getAudioTargetSeconds() {
+    const loopDuration = this.getAudioLoopDuration();
     if (loopDuration <= 0) {
-      return;
+      return 0;
     }
 
-    const previousPhaseSeconds = mode.phases
+    const previousPhaseSeconds = this.getCurrentMode().phases
       .slice(0, this.phaseIndex)
       .reduce((total, phase) => total + phase.duration, 0);
     const phaseElapsedSeconds = Math.max(0, this.pausedPhaseElapsedMs / 1000);
-    const targetSeconds = (previousPhaseSeconds + phaseElapsedSeconds) % loopDuration;
+    return (previousPhaseSeconds + phaseElapsedSeconds) % loopDuration;
+  },
+
+  getAudioDriftSeconds(actualSeconds, targetSeconds) {
+    const loopDuration = this.getAudioLoopDuration();
+    if (loopDuration <= 0) {
+      return actualSeconds - targetSeconds;
+    }
+
+    let driftSeconds = actualSeconds - targetSeconds;
+    if (driftSeconds > loopDuration / 2) {
+      driftSeconds -= loopDuration;
+    } else if (driftSeconds < -loopDuration / 2) {
+      driftSeconds += loopDuration;
+    }
+    return driftSeconds;
+  },
+
+  isAudioCueWindow(seconds) {
+    const loopDuration = this.getAudioLoopDuration();
+    if (loopDuration <= 0) {
+      return false;
+    }
+
+    const normalizedSeconds = ((seconds % loopDuration) + loopDuration) % loopDuration;
+    let phaseStartsAt = 0;
+    return this.getCurrentMode().phases.some((phase) => {
+      const inWindow = normalizedSeconds >= phaseStartsAt && normalizedSeconds < phaseStartsAt + AUDIO_CUE_GUARD_SECONDS;
+      phaseStartsAt += phase.duration;
+      return inWindow;
+    });
+  },
+
+  syncAudioToCurrentPhase(force) {
+    if (!this.audioContext || !this.data.soundEnabled || !this.isRunning) {
+      return;
+    }
+
+    const now = Date.now();
+    if (!force && now - this.lastAudioSyncAtMs < AUDIO_SYNC_INTERVAL_MS) {
+      return;
+    }
+
+    const targetSeconds = this.getAudioTargetSeconds();
+    const currentTime = Number(this.audioContext.currentTime) || 0;
+    const driftSeconds = this.getAudioDriftSeconds(currentTime, targetSeconds);
+    const toleranceSeconds = force ? AUDIO_FORCE_SYNC_TOLERANCE_SECONDS : AUDIO_DRIFT_TOLERANCE_SECONDS;
+
+    this.lastAudioSyncAtMs = now;
+
+    if (Math.abs(driftSeconds) <= toleranceSeconds) {
+      return;
+    }
+
+    if (!force && (this.isAudioCueWindow(currentTime) || this.isAudioCueWindow(targetSeconds))) {
+      return;
+    }
 
     this.audioContext.seek(targetSeconds);
   },
