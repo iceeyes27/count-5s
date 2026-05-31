@@ -5,12 +5,12 @@ const DEVICE_ID_KEY = "kegel-device-id";
 const PENDING_SYNC_KEY = "kegel-pending-seconds";
 const LEGACY_PENDING_SYNC_KEY = "kegel-pending-sync";
 const MODE_KEY = "kegel-training-mode";
-const MODE_PICKED_KEY = "kegel-mode-picked";
 const VOICE_KEY = "kegel-speech-voice";
 const LEGACY_CYCLE_SECONDS = 10;
 const CHECK_IN_SECONDS = 10 * 60;
 const AUDIO_ASSET_VERSION = "20260518-audio-clock";
 const TIMER_RENDER_INTERVAL_MS = 250;
+const STORAGE_FLUSH_DELAY_MS = 5000;
 
 const MODES = {
   normal: {
@@ -94,8 +94,6 @@ const phaseName = document.getElementById("phaseName");
 const countdown = document.getElementById("countdown");
 const phaseHint = document.getElementById("phaseHint");
 const modeDescription = document.getElementById("modeDescription");
-const modeHero = document.getElementById("modeHero");
-const modeHeroStatus = document.getElementById("modeHeroStatus");
 const currentModeBadge = document.getElementById("currentModeBadge");
 const audioStatus = document.getElementById("audioStatus");
 const checkInProgressText = document.getElementById("checkInProgressText");
@@ -129,7 +127,6 @@ let isRunning = false;
 let hasStarted = false;
 let currentModeKey = loadModeKey();
 let currentVoiceKey = loadVoiceKey();
-let modeSelectionComplete = true;
 let phaseIndex = 0;
 let secondsLeft = getCurrentPhases()[0].duration;
 let elapsed = 0;
@@ -139,6 +136,9 @@ let fallbackStartedAtMs = 0;
 let fallbackStartedElapsed = 0;
 let dailyCache = loadSecondsCache();
 let pendingSync = loadPendingSeconds();
+let cacheDirty = false;
+let pendingSyncDirty = false;
+let storageFlushTimeoutId = null;
 let deviceId = loadDeviceId();
 let remoteState = "local-cache";
 let syncInFlight = false;
@@ -152,6 +152,12 @@ let backgroundAudioError = "";
 let stoppingBackgroundAudio = false;
 let backgroundAudioOffsetSeconds = 0;
 let lastBackgroundAudioTime = 0;
+let lastRenderedHistoryKey = "";
+let historyDirty = true;
+let lastPulseMeterState = "";
+let lastPulseRunningState = null;
+let lastPulseNote = "";
+let lastPulsePanelVisible = null;
 
 function getTodayDate() {
   return getDateKeyForTime(Date.now());
@@ -197,6 +203,50 @@ function loadStoredObject(storageKey) {
 
 function saveStoredObject(storageKey, data) {
   window.localStorage.setItem(storageKey, JSON.stringify(data));
+}
+
+function scheduleStorageFlush() {
+  if (storageFlushTimeoutId !== null) {
+    return;
+  }
+
+  storageFlushTimeoutId = window.setTimeout(() => {
+    storageFlushTimeoutId = null;
+    flushStoredState();
+  }, STORAGE_FLUSH_DELAY_MS);
+}
+
+function markCacheDirty() {
+  cacheDirty = true;
+  scheduleStorageFlush();
+}
+
+function markPendingSyncDirty() {
+  pendingSyncDirty = true;
+  scheduleStorageFlush();
+}
+
+function flushStoredState() {
+  if (storageFlushTimeoutId !== null) {
+    window.clearTimeout(storageFlushTimeoutId);
+    storageFlushTimeoutId = null;
+  }
+
+  try {
+    if (cacheDirty) {
+      saveStoredObject(CACHE_KEY, dailyCache);
+      cacheDirty = false;
+    }
+
+    if (pendingSyncDirty) {
+      saveStoredObject(PENDING_SYNC_KEY, pendingSync);
+      pendingSyncDirty = false;
+    }
+  } catch {
+    if (cacheDirty || pendingSyncDirty) {
+      scheduleStorageFlush();
+    }
+  }
 }
 
 function mergeStoredObjects(primary, fallback) {
@@ -269,26 +319,6 @@ function loadModeKey() {
 function loadVoiceKey() {
   const stored = window.localStorage.getItem(VOICE_KEY);
   return stored && SPEECH_VOICES[stored] ? stored : "xiaoxiao";
-}
-
-function loadModeSelectionComplete() {
-  try {
-    return window.sessionStorage.getItem(MODE_PICKED_KEY) !== "0";
-  } catch {
-    return true;
-  }
-}
-
-function saveModeSelectionComplete(value) {
-  try {
-    if (value) {
-      window.sessionStorage.setItem(MODE_PICKED_KEY, "1");
-    } else {
-      window.sessionStorage.removeItem(MODE_PICKED_KEY);
-    }
-  } catch {
-    return;
-  }
 }
 
 function getCurrentMode() {
@@ -434,7 +464,7 @@ function ensureBackgroundAudioElement() {
 
   backgroundAudio = document.createElement("audio");
   backgroundAudio.loop = true;
-  backgroundAudio.preload = "auto";
+  backgroundAudio.preload = "metadata";
   backgroundAudio.setAttribute("playsinline", "");
   backgroundAudio.setAttribute("webkit-playsinline", "");
   backgroundAudio.addEventListener("play", () => {
@@ -457,6 +487,8 @@ function ensureBackgroundAudioElement() {
     render();
   });
   backgroundAudio.addEventListener("pause", () => {
+    updateBackgroundAudioClockOffset();
+    accountElapsedToNow({ includePausedAudio: true });
     backgroundAudioRunning = false;
     if (isRunning && !stoppingBackgroundAudio) {
       pauseTimer();
@@ -465,8 +497,13 @@ function ensureBackgroundAudioElement() {
     render();
   });
   backgroundAudio.addEventListener("error", () => {
+    updateBackgroundAudioClockOffset();
+    accountElapsedToNow({ includePausedAudio: true });
     backgroundAudioRunning = false;
     backgroundAudioError = "节奏音加载失败，当前使用前台语音播报";
+    if (isRunning) {
+      startFallbackClock();
+    }
     render();
   });
   document.body.appendChild(backgroundAudio);
@@ -521,18 +558,18 @@ function updateBackgroundAudioClockOffset() {
   lastBackgroundAudioTime = currentTime;
 }
 
-function isBackgroundAudioClockActive() {
+function isBackgroundAudioClockActive({ includePaused = false } = {}) {
   return (
     currentVoiceKey !== "mute" &&
     backgroundAudioRunning &&
     backgroundAudio &&
-    !backgroundAudio.paused &&
+    (includePaused || !backgroundAudio.paused) &&
     backgroundAudio.readyState > 0
   );
 }
 
-function getPracticeElapsedSeconds() {
-  if (isBackgroundAudioClockActive()) {
+function getPracticeElapsedSeconds({ includePausedAudio = false } = {}) {
+  if (isBackgroundAudioClockActive({ includePaused: includePausedAudio })) {
     updateBackgroundAudioClockOffset();
     return Math.max(elapsed, backgroundAudioOffsetSeconds + (backgroundAudio.currentTime || 0));
   }
@@ -757,24 +794,43 @@ function getPendingTotal() {
   return Object.values(pendingSync).reduce((sum, value) => sum + value, 0);
 }
 
-function setCachedSeconds(dateKey, totalSeconds) {
-  if (totalSeconds <= 0) {
-    delete dailyCache[dateKey];
-  } else {
-    dailyCache[dateKey] = Math.floor(totalSeconds);
+function markHistoryDirty() {
+  historyDirty = true;
+}
+
+function markHistoryDirtyIfCalendarBucketChanged(dateKey, previousSeconds, nextSeconds) {
+  if (!isValidDateKey(dateKey)) {
+    return;
   }
 
-  saveStoredObject(CACHE_KEY, dailyCache);
+  if (getCalendarDisplayBucket(previousSeconds) !== getCalendarDisplayBucket(nextSeconds)) {
+    markHistoryDirty();
+  }
+}
+
+function setCachedSeconds(dateKey, totalSeconds) {
+  const previousSeconds = getCachedSeconds(dateKey);
+  const nextSeconds = Math.max(0, Math.floor(totalSeconds));
+
+  if (nextSeconds <= 0) {
+    delete dailyCache[dateKey];
+  } else {
+    dailyCache[dateKey] = nextSeconds;
+  }
+
+  markHistoryDirtyIfCalendarBucketChanged(dateKey, previousSeconds, nextSeconds);
+  markCacheDirty();
 }
 
 function replaceCache(nextCache) {
   dailyCache = nextCache;
-  saveStoredObject(CACHE_KEY, dailyCache);
+  markHistoryDirty();
+  markCacheDirty();
 }
 
 function addPendingSeconds(dateKey, deltaSeconds) {
   pendingSync[dateKey] = getPendingSeconds(dateKey) + deltaSeconds;
-  saveStoredObject(PENDING_SYNC_KEY, pendingSync);
+  markPendingSyncDirty();
 }
 
 function resolvePendingSeconds(dateKey, syncedDelta, serverSeconds) {
@@ -787,7 +843,7 @@ function resolvePendingSeconds(dateKey, syncedDelta, serverSeconds) {
     pendingSync[dateKey] = nextPending;
   }
 
-  saveStoredObject(PENDING_SYNC_KEY, pendingSync);
+  markPendingSyncDirty();
   setCachedSeconds(dateKey, serverSeconds + nextPending);
 }
 
@@ -879,7 +935,42 @@ function getMonthCells(monthKey, records) {
   return cells;
 }
 
-function renderHistory() {
+function getCalendarDisplayBucket(seconds) {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+
+  if (safeSeconds <= 0) {
+    return "none";
+  }
+
+  if (safeSeconds < 60) {
+    return "under-minute";
+  }
+
+  return `minutes-${Math.ceil(safeSeconds / 60)}`;
+}
+
+function getHistoryRenderKey() {
+  return Object.entries(dailyCache)
+    .filter(([dateKey, seconds]) => isValidDateKey(dateKey) && seconds > 0)
+    .sort(([leftDate], [rightDate]) => leftDate.localeCompare(rightDate))
+    .map(([dateKey, seconds]) => `${dateKey}:${getCalendarDisplayBucket(seconds)}`)
+    .join("|");
+}
+
+function renderHistory({ force = false } = {}) {
+  if (!force && !historyDirty) {
+    return;
+  }
+
+  const historyKey = getHistoryRenderKey();
+
+  if (!force && historyKey === lastRenderedHistoryKey) {
+    historyDirty = false;
+    return;
+  }
+
+  lastRenderedHistoryKey = historyKey;
+  historyDirty = false;
   const months = buildMonthlyCalendars();
 
   if (months.length === 0) {
@@ -948,29 +1039,27 @@ function updateVoiceSelect() {
   }
 }
 
-function updateModeHero() {
-  if (!modeHero || !modeHeroStatus) {
-    return;
-  }
-
-  modeHero.hidden = modeSelectionComplete;
-
-  if (!modeSelectionComplete) {
-    modeHeroStatus.textContent = "选择后开始按钮才会启用";
-    return;
-  }
-
-  modeHeroStatus.textContent = `${getCurrentMode().name} 已选，可直接开始训练`;
-}
-
 function updateTrainingLayout() {
-  document.body.classList.toggle("mode-selected", modeSelectionComplete);
+  document.body.classList.add("mode-selected");
 }
 
-function updatePulseGraph(now = performance.now()) {
-  const isQuickMode = currentModeKey === "quick" && modeSelectionComplete;
-  pulsePanel.hidden = !isQuickMode;
-  pulsePanel.setAttribute("aria-hidden", String(!isQuickMode));
+function renderStaticControls() {
+  currentModeBadge.textContent = getCurrentMode().name;
+  modeDescription.textContent = "默认普通模式，打开微信后可直接开始。";
+  updateRhythm();
+  updateModeSwitcher();
+  updateVoiceSelect();
+  updateTrainingLayout();
+}
+
+function updatePulseGraph(now = performance.now(), { animateOnly = false } = {}) {
+  const isQuickMode = currentModeKey === "quick";
+
+  if (!animateOnly && lastPulsePanelVisible !== isQuickMode) {
+    pulsePanel.hidden = !isQuickMode;
+    pulsePanel.setAttribute("aria-hidden", String(!isQuickMode));
+    lastPulsePanelVisible = isQuickMode;
+  }
 
   if (!isQuickMode) {
     return;
@@ -997,10 +1086,26 @@ function updatePulseGraph(now = performance.now()) {
     }
   }
 
-  pulseMeter.dataset.phase = meterState;
-  pulseMeter.dataset.running = String(isRunning);
   pulseWaveScroll.style.transform = `translate3d(-${waveShiftPercent.toFixed(3)}%, 0, 0)`;
-  pulseNote.textContent = note;
+
+  if (animateOnly) {
+    return;
+  }
+
+  if (lastPulseMeterState !== meterState) {
+    pulseMeter.dataset.phase = meterState;
+    lastPulseMeterState = meterState;
+  }
+
+  if (lastPulseRunningState !== isRunning) {
+    pulseMeter.dataset.running = String(isRunning);
+    lastPulseRunningState = isRunning;
+  }
+
+  if (lastPulseNote !== note) {
+    pulseNote.textContent = note;
+    lastPulseNote = note;
+  }
 }
 
 function stopPulseAnimation() {
@@ -1011,9 +1116,9 @@ function stopPulseAnimation() {
 }
 
 function runPulseAnimation() {
-  updatePulseGraph();
+  updatePulseGraph(performance.now(), { animateOnly: true });
 
-  if (isRunning && currentModeKey === "quick" && modeSelectionComplete) {
+  if (isRunning && currentModeKey === "quick") {
     animationFrameId = window.requestAnimationFrame(runPulseAnimation);
   } else {
     animationFrameId = null;
@@ -1022,7 +1127,7 @@ function runPulseAnimation() {
 
 function startPulseAnimation() {
   stopPulseAnimation();
-  if (currentModeKey === "quick" && modeSelectionComplete) {
+  if (currentModeKey === "quick") {
     animationFrameId = window.requestAnimationFrame(runPulseAnimation);
   }
 }
@@ -1091,12 +1196,8 @@ function updateCheckInProgress(todaySeconds) {
 }
 
 function render() {
-  const currentMode = getCurrentMode();
   const currentPhase = getCurrentPhases()[phaseIndex];
   const summary = buildSummary();
-  currentModeBadge.textContent = currentMode.name;
-
-  modeDescription.textContent = "默认普通模式，打开微信后可直接开始。";
 
   if (!hasStarted) {
     phaseName.textContent = "准备开始";
@@ -1123,10 +1224,6 @@ function render() {
   updateCheckInProgress(summary.todaySeconds);
   renderHistory();
   updateRhythm();
-  updateModeSwitcher();
-  updateVoiceSelect();
-  updateModeHero();
-  updateTrainingLayout();
   updatePulseGraph();
   startButton.disabled = isRunning;
   pauseButton.disabled = !isRunning;
@@ -1320,12 +1417,12 @@ function preparePracticeAccounting() {
   applyPhaseStateFromElapsed(elapsed);
 }
 
-function accountElapsedToNow() {
+function accountElapsedToNow({ includePausedAudio = false } = {}) {
   if (!isRunning) {
     return 0;
   }
 
-  const preciseElapsed = getPracticeElapsedSeconds();
+  const preciseElapsed = getPracticeElapsedSeconds({ includePausedAudio });
   const nextElapsed = Math.floor(preciseElapsed);
   const deltaSeconds = nextElapsed - lastAccountedElapsed;
   if (deltaSeconds <= 0) {
@@ -1431,10 +1528,8 @@ function switchMode(nextModeKey) {
     return;
   }
 
-  modeSelectionComplete = true;
-  saveModeSelectionComplete(true);
-
   if (nextModeKey === currentModeKey) {
+    renderStaticControls();
     render();
     return;
   }
@@ -1442,6 +1537,7 @@ function switchMode(nextModeKey) {
   currentModeKey = nextModeKey;
   window.localStorage.setItem(MODE_KEY, currentModeKey);
   restartCurrentSession();
+  renderStaticControls();
 }
 
 function switchVoice(nextVoiceKey) {
@@ -1472,16 +1568,25 @@ function switchVoice(nextVoiceKey) {
       }
     });
   }
+
+  renderStaticControls();
+  render();
 }
 
-function refreshRunningState() {
+function settleRunningState() {
   if (!isRunning) {
+    flushStoredState();
     return;
   }
 
-  const previousPhaseIndex = phaseIndex;
   accountElapsedToNow();
-  announcePhaseIfNeeded(previousPhaseIndex);
+  applyPhaseStateFromElapsed(elapsed);
+  flushStoredState();
+}
+
+function handlePageLifecyclePause() {
+  settleRunningState();
+  void flushAllPendingDates();
   render();
 }
 
@@ -1519,13 +1624,22 @@ modeButtons.forEach((button) => {
   });
 });
 window.addEventListener("online", () => {
-  refreshRunningState();
+  handlePageLifecyclePause();
   void refreshFromCloudflare();
   void flushAllPendingDates();
 });
-window.addEventListener("focus", refreshRunningState);
-window.addEventListener("pageshow", refreshRunningState);
-document.addEventListener("visibilitychange", refreshRunningState);
+window.addEventListener("focus", handlePageLifecyclePause);
+window.addEventListener("pageshow", handlePageLifecyclePause);
+window.addEventListener("pagehide", handlePageLifecyclePause);
+window.addEventListener("beforeunload", settleRunningState);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    handlePageLifecyclePause();
+    return;
+  }
+
+  handlePageLifecyclePause();
+});
 if (canSpeak()) {
   loadBrowserSpeechVoices();
   scheduleSpeechVoiceLoad();
@@ -1535,6 +1649,7 @@ if (canSpeak()) {
   }
 }
 
+renderStaticControls();
 render();
 void refreshFromCloudflare();
 void flushAllPendingDates();
