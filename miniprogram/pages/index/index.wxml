@@ -55,6 +55,7 @@
       </button>
     </view>
     <text class="sound-note">本地提示音：{{soundEnabled ? '开启' : '关闭'}}</text>
+    <text class="sound-note">{{soundStatusText}}</text>
   </view>
 
   <view class="stats">
