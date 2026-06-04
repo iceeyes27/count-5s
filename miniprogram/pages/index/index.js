@@ -214,7 +214,7 @@ Page({
     history: [],
     storagePolicyText: "数据保存在当前手机；换手机请先导出 JSON，再在新手机导入。",
     storageUsageText: "存储空间：--",
-    soundStatusText: "进入浮窗后应继续播放提示音"
+    soundStatusText: "点击开始后播放本地提示音"
   },
 
   timerId: null,
@@ -344,13 +344,11 @@ Page({
       return this.audioContext;
     }
 
-    const audio = wx.getBackgroundAudioManager();
-    audio.epname = "凯格尔运动计时器";
-    audio.title = "凯格尔运动计时器";
-    audio.singer = "count-5s";
-    audio.coverImgUrl = "";
+    const audio = wx.createInnerAudioContext();
+    audio.loop = true;
+    audio.obeyMuteSwitch = false;
     this.audioContext = audio;
-    this.audioReady = Number(audio.duration) > 0 || Number(audio.currentTime) > 0;
+    this.audioReady = false;
     this.bindAudioEvents(audio);
     this.refreshAudioStatus();
     return audio;
@@ -413,7 +411,7 @@ Page({
       error: (error) => {
         this.isAudioPlaying = false;
         this.audioReady = false;
-        this.audioStatusMessage = "浮窗后提示音未继续播放，请返回页面后重试开始";
+        this.audioStatusMessage = "提示音播放失败，请返回页面后重试开始";
         if (this.isRunning) {
           this.startFallbackClock();
         }
@@ -423,7 +421,7 @@ Page({
         if (now - this.lastAudioNoticeAtMs >= 5000) {
           this.lastAudioNoticeAtMs = now;
           wx.showToast({
-            title: error && error.errMsg ? "后台提示音启动失败" : "提示音播放失败",
+            title: "提示音播放失败",
             icon: "none"
           });
         }
@@ -450,14 +448,14 @@ Page({
     }
 
     if (this.isRunning && this.isAudioPlaying) {
-      return "提示音播放中，浮窗后应继续播放";
+      return "提示音播放中";
     }
 
     if (this.isRunning) {
-      return "正在启动后台提示音";
+      return "正在启动提示音";
     }
 
-    return "进入浮窗后应继续播放提示音";
+    return "点击开始后播放本地提示音";
   },
 
   refreshAudioStatus() {
@@ -474,9 +472,7 @@ Page({
       this.audioReady = false;
       this.isAudioPlaying = false;
       this.audioSourcePath = mode.audio;
-      audio.title = `${mode.name}节奏提示`;
-      audio.epname = "凯格尔运动计时器";
-      audio.singer = mode.name;
+      audio.stop();
       audio.src = mode.audio;
     }
 
@@ -1129,7 +1125,12 @@ Page({
   },
 
   destroyAudio() {
-    this.stopAudio(false);
+    if (this.audioContext) {
+      this.stopAudio(false);
+      if (typeof this.audioContext.destroy === "function") {
+        this.audioContext.destroy();
+      }
+    }
     this.audioContext = null;
     this.audioHandlers = null;
     this.audioEventsBound = false;
