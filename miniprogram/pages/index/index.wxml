@@ -34,7 +34,7 @@
 
   <view class="mode-card">
     <view class="section-header">
-      <text class="section-title">训练模式</text>
+      <text class="section-title">训练节奏</text>
       <view
         class="sound-toggle {{soundEnabled ? 'active' : ''}}"
         role="switch"
@@ -44,16 +44,27 @@
         <view class="sound-toggle-dot"></view>
       </view>
     </view>
-    <view class="mode-switch">
-      <button class="mode-button {{modeKey === 'normal' ? 'active' : ''}}" data-mode="normal" bindtap="switchMode">
-        <text>普通</text>
-        <text class="mode-small">5 秒收紧 / 5 秒放松</text>
-      </button>
-      <button class="mode-button {{modeKey === 'quick' ? 'active' : ''}}" data-mode="quick" bindtap="switchMode">
-        <text>快速</text>
-        <text class="mode-small">1 秒收紧 / 2 秒放松</text>
-      </button>
+    <view class="timing-grid">
+      <picker class="timing-picker" mode="selector" range="{{tightenOptions}}" value="{{tightenIndex}}" data-field="tighten" bindchange="updateCustomTiming">
+        <view class="timing-picker-inner">
+          <text class="timing-label">收紧</text>
+          <view class="timing-value-group">
+            <text class="timing-value">{{tightenSeconds}}</text>
+            <text class="timing-unit">秒</text>
+          </view>
+        </view>
+      </picker>
+      <picker class="timing-picker" mode="selector" range="{{relaxOptions}}" value="{{relaxIndex}}" data-field="relax" bindchange="updateCustomTiming">
+        <view class="timing-picker-inner">
+          <text class="timing-label">放松</text>
+          <view class="timing-value-group">
+            <text class="timing-value">{{relaxSeconds}}</text>
+            <text class="timing-unit">秒</text>
+          </view>
+        </view>
+      </picker>
     </view>
+    <text class="sound-note">当前节奏：{{tightenSeconds}} 秒收紧 / {{relaxSeconds}} 秒放松</text>
     <text class="sound-note">本地提示音：{{soundEnabled ? '开启' : '关闭'}}</text>
     <text class="sound-note">{{soundStatusText}}</text>
   </view>

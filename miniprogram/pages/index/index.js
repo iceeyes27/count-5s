@@ -2,10 +2,13 @@ const CHECK_IN_SECONDS = 10 * 60;
 const AUTOSAVE_INTERVAL_MS = 15 * 1000;
 const STORAGE_USAGE_WARN_RATIO = 0.7;
 const TIMER_RENDER_INTERVAL_MS = 250;
-const AUDIO_SYNC_INTERVAL_MS = 3000;
-const AUDIO_DRIFT_TOLERANCE_SECONDS = 0.15;
-const AUDIO_FORCE_SYNC_TOLERANCE_SECONDS = 0.05;
-const AUDIO_CUE_GUARD_SECONDS = 0.8;
+const DEFAULT_TIGHTEN_SECONDS = 5;
+const DEFAULT_RELAX_SECONDS = 5;
+const PHASE_SECOND_OPTIONS = Array.from({ length: 10 }, (_, index) => index + 1);
+const PHASE_CUE_AUDIO = {
+  tighten: "/audio/cue-tighten.wav",
+  relax: "/audio/cue-relax.wav"
+};
 const STORAGE_KEYS = {
   config: "kegel-mini-config",
   legacyRecords: "kegel-mini-daily-seconds",
@@ -15,33 +18,59 @@ const STORAGE_KEYS = {
 
 const MODES = {
   normal: {
-    name: "普通模式",
-    description: "普通模式：5 秒收紧，5 秒放松，自动循环。",
-    audio: "/audio/kegel-normal.m4a",
-    phases: [
-      { name: "收紧", hint: "收紧骨盆底肌，保持均匀发力", duration: 5 },
-      { name: "放松", hint: "放松骨盆底肌，让肌肉自然恢复", duration: 5 }
-    ]
-  },
-  quick: {
-    name: "快速模式",
-    description: "快速模式：1 秒收紧，2 秒放松，自动循环。",
-    audio: "/audio/kegel-quick.m4a",
-    phases: [
-      { name: "收紧", hint: "快速收紧骨盆底肌，短促但清晰发力", duration: 1 },
-      { name: "放松", hint: "快速放松骨盆底肌，让肌肉完全松开", duration: 2 }
-    ]
+    name: "默认节奏"
   }
 };
 
 const DEFAULT_CONFIG = {
   modeKey: "normal",
+  tightenSeconds: DEFAULT_TIGHTEN_SECONDS,
+  relaxSeconds: DEFAULT_RELAX_SECONDS,
   soundEnabled: true
 };
 
-function getMode(modeKey) {
-  return MODES[modeKey] || MODES.normal;
+function clampPhaseSeconds(value) {
+  const nextValue = Math.floor(Number(value) || 0);
+  if (nextValue < PHASE_SECOND_OPTIONS[0]) {
+    return PHASE_SECOND_OPTIONS[0];
+  }
+  return Math.min(PHASE_SECOND_OPTIONS[PHASE_SECOND_OPTIONS.length - 1], nextValue);
 }
+
+function createPhases(tightenSeconds, relaxSeconds) {
+  return [
+    {
+      name: "收紧",
+      hint: "收紧骨盆底肌，保持均匀发力",
+      duration: tightenSeconds
+    },
+    {
+      name: "放松",
+      hint: "放松骨盆底肌，让肌肉自然恢复",
+      duration: relaxSeconds
+    }
+  ];
+}
+
+function getMode(modeKey, tightenSeconds = DEFAULT_TIGHTEN_SECONDS, relaxSeconds = DEFAULT_RELAX_SECONDS) {
+  const safeModeKey = MODES[modeKey] ? modeKey : DEFAULT_CONFIG.modeKey;
+  const safeTightenSeconds = clampPhaseSeconds(tightenSeconds);
+  const safeRelaxSeconds = clampPhaseSeconds(relaxSeconds);
+  const isDefaultRhythm = safeTightenSeconds === DEFAULT_TIGHTEN_SECONDS && safeRelaxSeconds === DEFAULT_RELAX_SECONDS;
+
+  return {
+    key: safeModeKey,
+    name: isDefaultRhythm ? "默认节奏" : "自定义节奏",
+    description: `${isDefaultRhythm ? "默认节奏" : "自定义节奏"}：${safeTightenSeconds} 秒收紧，${safeRelaxSeconds} 秒放松，自动循环。`,
+    phases: createPhases(safeTightenSeconds, safeRelaxSeconds)
+  };
+}
+
+const DEFAULT_MODE = getMode(
+  DEFAULT_CONFIG.modeKey,
+  DEFAULT_CONFIG.tightenSeconds,
+  DEFAULT_CONFIG.relaxSeconds
+);
 
 function padDatePart(value) {
   return String(value).padStart(2, "0");
@@ -197,11 +226,17 @@ function mergeDailySummary(target, summary) {
 Page({
   data: {
     modeKey: DEFAULT_CONFIG.modeKey,
-    modeName: MODES.normal.name,
-    modeDescription: MODES.normal.description,
+    modeName: DEFAULT_MODE.name,
+    modeDescription: DEFAULT_MODE.description,
+    tightenSeconds: DEFAULT_CONFIG.tightenSeconds,
+    relaxSeconds: DEFAULT_CONFIG.relaxSeconds,
+    tightenOptions: PHASE_SECOND_OPTIONS,
+    relaxOptions: PHASE_SECOND_OPTIONS,
+    tightenIndex: PHASE_SECOND_OPTIONS.indexOf(DEFAULT_CONFIG.tightenSeconds),
+    relaxIndex: PHASE_SECOND_OPTIONS.indexOf(DEFAULT_CONFIG.relaxSeconds),
     soundEnabled: DEFAULT_CONFIG.soundEnabled,
     phaseName: "准备开始",
-    phaseHint: "点击开始后进入 5 秒收紧",
+    phaseHint: `点击开始后进入 ${DEFAULT_CONFIG.tightenSeconds} 秒收紧`,
     countdownText: "--",
     elapsedText: "0 秒",
     todayText: "0 秒",
@@ -214,11 +249,12 @@ Page({
     history: [],
     storagePolicyText: "数据保存在当前手机；换手机请先导出 JSON，再在新手机导入。",
     storageUsageText: "存储空间：--",
-    soundStatusText: "点击开始后播放本地提示音"
+    soundStatusText: "点击开始后在收紧 / 放松切换时播放提示音"
   },
 
   timerId: null,
-  audioContext: null,
+  cuePlayers: null,
+  lastCueKey: "",
   audioHandlers: null,
   audioEventsBound: false,
   audioReady: false,
@@ -254,7 +290,8 @@ Page({
 
   initRuntimeState() {
     this.timerId = null;
-    this.audioContext = null;
+    this.cuePlayers = null;
+    this.lastCueKey = "";
     this.audioHandlers = null;
     this.audioEventsBound = false;
     this.audioReady = false;
@@ -284,9 +321,10 @@ Page({
   onShow() {
     if (this.isRunning) {
       this.accountElapsedToNow();
-      this.updatePhaseFromClock();
+      this.markCurrentCuePlayed(this.getPracticeElapsedSeconds());
+      this.updatePhaseFromClock({ allowCue: false, referenceElapsed: this.getPracticeElapsedSeconds() });
       this.startTicker();
-      this.startAudio(true);
+      this.scheduleNextCue();
       this.tick();
     } else {
       this.refreshAudioStatus();
@@ -298,9 +336,7 @@ Page({
     this.commitActiveSessionSnapshot(true);
     this.saveDirtyDailySummaries();
     this.stopTicker();
-    if (!this.isRunning) {
-      this.pauseAudio();
-    }
+    this.clearCueTimer();
   },
 
   onUnload() {
@@ -321,6 +357,9 @@ Page({
       config.modeKey = DEFAULT_CONFIG.modeKey;
     }
 
+    const tightenSeconds = clampPhaseSeconds(config.tightenSeconds);
+    const relaxSeconds = clampPhaseSeconds(config.relaxSeconds);
+
     this.monthlyEvents = this.loadMonthlyEvents();
     this.dailySummaries = this.loadDailySummaries();
 
@@ -335,107 +374,116 @@ Page({
 
     this.setData({
       modeKey: config.modeKey,
+      tightenSeconds,
+      relaxSeconds,
+      tightenIndex: PHASE_SECOND_OPTIONS.indexOf(tightenSeconds),
+      relaxIndex: PHASE_SECOND_OPTIONS.indexOf(relaxSeconds),
       soundEnabled: Boolean(config.soundEnabled)
     });
   },
 
-  ensureAudioContext() {
-    if (this.audioContext) {
-      return this.audioContext;
+  ensureCuePlayers() {
+    if (this.cuePlayers) {
+      return this.cuePlayers;
     }
 
-    const audio = wx.createInnerAudioContext();
-    audio.loop = true;
-    audio.obeyMuteSwitch = false;
-    this.audioContext = audio;
-    this.audioReady = false;
-    this.bindAudioEvents(audio);
-    this.refreshAudioStatus();
-    return audio;
+    const createCuePlayer = (src) => {
+      const player = wx.createInnerAudioContext();
+      player.obeyMuteSwitch = false;
+      player.autoplay = false;
+      player.src = src;
+      player.onError(() => this.handleCueError());
+      return player;
+    };
+
+    this.cuePlayers = {
+      tighten: createCuePlayer(PHASE_CUE_AUDIO.tighten),
+      relax: createCuePlayer(PHASE_CUE_AUDIO.relax)
+    };
+
+    return this.cuePlayers;
   },
 
-  bindAudioEvents(audio) {
-    if (!audio || this.audioEventsBound) {
+  handleCueError() {
+    this.audioStatusMessage = "提示音播放失败，请返回页面后重试开始";
+    this.refreshAudioStatus();
+
+    const now = Date.now();
+    if (now - this.lastAudioNoticeAtMs >= 5000) {
+      this.lastAudioNoticeAtMs = now;
+      wx.showToast({
+        title: "提示音播放失败",
+        icon: "none"
+      });
+    }
+  },
+
+  clearCueTimer() {
+    if (this.lastAudioSyncAtMs) {
+      clearTimeout(this.lastAudioSyncAtMs);
+      this.lastAudioSyncAtMs = 0;
+    }
+  },
+
+  getCueKey(state) {
+    return `${state.cycleIndex}:${state.phaseIndex}`;
+  },
+
+  playCueForPhase(phaseIndex) {
+    if (!this.data.soundEnabled) {
       return;
     }
 
-    this.audioHandlers = {
-      play: () => {
-        this.isAudioPlaying = true;
-        this.audioReady = true;
-        this.audioStatusMessage = "";
-        this.updateAudioClockOffset();
-        this.stopFallbackClock();
-        this.refreshAudioStatus();
-      },
-      pause: () => {
-        this.isAudioPlaying = false;
-        this.updateAudioClockOffset();
-        if (this.isRunning) {
-          this.startFallbackClock();
-        }
-        this.refreshAudioStatus();
-      },
-      stop: () => {
-        this.isAudioPlaying = false;
-        this.audioReady = false;
-        this.updateAudioClockOffset();
-        if (this.isRunning) {
-          this.startFallbackClock();
-        }
-        this.refreshAudioStatus();
-      },
-      ended: () => {
-        this.updateAudioClockOffset();
-        this.accountElapsedToNow();
-        this.isAudioPlaying = false;
-        if (this.isRunning) {
-          this.startAudio(true);
-          return;
-        }
-        this.refreshAudioStatus();
-      },
-      timeUpdate: () => {
-        this.audioReady = true;
-        this.updateAudioClockOffset();
-        if (this.isRunning) {
-          this.accountElapsedToNow();
-        }
-      },
-      waiting: () => {
-        if (this.isRunning) {
-          this.startFallbackClock();
-        }
-        this.refreshAudioStatus();
-      },
-      error: (error) => {
-        this.isAudioPlaying = false;
-        this.audioReady = false;
-        this.audioStatusMessage = "提示音播放失败，请返回页面后重试开始";
-        if (this.isRunning) {
-          this.startFallbackClock();
-        }
-        this.refreshAudioStatus();
+    const cueType = phaseIndex === 0 ? "tighten" : "relax";
+    const player = this.ensureCuePlayers()[cueType];
+    if (!player) {
+      return;
+    }
 
-        const now = Date.now();
-        if (now - this.lastAudioNoticeAtMs >= 5000) {
-          this.lastAudioNoticeAtMs = now;
-          wx.showToast({
-            title: "提示音播放失败",
-            icon: "none"
-          });
-        }
+    this.audioStatusMessage = "";
+    this.refreshAudioStatus();
+
+    try {
+      if (typeof player.stop === "function") {
+        player.stop();
       }
-    };
+      if (typeof player.seek === "function") {
+        player.seek(0);
+      }
+      player.play();
+    } catch (error) {
+      this.handleCueError();
+    }
+  },
 
-    audio.onPlay(this.audioHandlers.play);
-    audio.onPause(this.audioHandlers.pause);
-    audio.onStop(this.audioHandlers.stop);
-    audio.onEnded(this.audioHandlers.ended);
-    audio.onTimeUpdate(this.audioHandlers.timeUpdate);
-    audio.onWaiting(this.audioHandlers.waiting);
-    audio.onError(this.audioHandlers.error);
-    this.audioEventsBound = true;
+  markCurrentCuePlayed(totalElapsedSeconds = this.getPracticeElapsedSeconds()) {
+    const state = this.getPhaseStateFromElapsed(totalElapsedSeconds);
+    this.lastCueKey = this.getCueKey(state);
+    return state;
+  },
+
+  scheduleNextCue() {
+    this.clearCueTimer();
+    if (!this.isRunning || !this.data.soundEnabled) {
+      return;
+    }
+
+    const preciseElapsed = this.getPracticeElapsedSeconds();
+    const state = this.getPhaseStateFromElapsed(preciseElapsed);
+    const phase = this.getCurrentMode().phases[state.phaseIndex];
+    const remainingMs = Math.max(10, Math.round(phase.duration * 1000 - state.phaseElapsedMs));
+
+    this.lastAudioSyncAtMs = setTimeout(() => {
+      this.lastAudioSyncAtMs = 0;
+      if (!this.isRunning || !this.data.soundEnabled) {
+        return;
+      }
+
+      this.accountElapsedToNow();
+      this.updatePhaseFromClock({ allowCue: true, referenceElapsed: this.getPracticeElapsedSeconds() });
+      this.renderAll();
+      this.scheduleNextCue();
+    }, remainingMs);
   },
 
   getSoundStatusText() {
@@ -447,36 +495,15 @@ Page({
       return this.audioStatusMessage;
     }
 
-    if (this.isRunning && this.isAudioPlaying) {
-      return "提示音播放中";
-    }
-
     if (this.isRunning) {
-      return "正在启动提示音";
+      return "收紧 / 放松切换时播放提示音";
     }
 
-    return "点击开始后播放本地提示音";
+    return "点击开始后在收紧 / 放松切换时播放提示音";
   },
 
   refreshAudioStatus() {
     this.setData({ soundStatusText: this.getSoundStatusText() });
-  },
-
-  prepareAudioSource(audio, mode) {
-    if (!audio || !mode) {
-      return false;
-    }
-
-    const shouldReplace = this.audioSourcePath !== mode.audio;
-    if (shouldReplace) {
-      this.audioReady = false;
-      this.isAudioPlaying = false;
-      this.audioSourcePath = mode.audio;
-      audio.stop();
-      audio.src = mode.audio;
-    }
-
-    return shouldReplace;
   },
 
   loadMonthlyEvents() {
@@ -527,6 +554,8 @@ Page({
   saveConfig() {
     wx.setStorageSync(STORAGE_KEYS.config, {
       modeKey: this.data.modeKey,
+      tightenSeconds: this.data.tightenSeconds,
+      relaxSeconds: this.data.relaxSeconds,
       soundEnabled: this.data.soundEnabled
     });
   },
@@ -569,7 +598,7 @@ Page({
   },
 
   getCurrentMode() {
-    return getMode(this.data.modeKey);
+    return getMode(this.data.modeKey, this.data.tightenSeconds, this.data.relaxSeconds);
   },
 
   getCurrentPhase() {
@@ -594,8 +623,11 @@ Page({
       createdAt: now,
       lastSavedAt: 0
     };
+    this.audioStatusMessage = "";
+    const currentState = this.markCurrentCuePlayed(this.elapsedSeconds);
+    this.playCueForPhase(currentState.phaseIndex);
     this.startTicker();
-    this.startAudio(true);
+    this.scheduleNextCue();
     this.tick();
   },
 
@@ -630,6 +662,7 @@ Page({
     this.hasStarted = false;
     this.activeSession = null;
     this.phaseIndex = 0;
+    this.lastCueKey = "";
     this.lastAccountedElapsed = 0;
     this.lastAccountedAtWallMs = 0;
     this.fallbackStartedAtMs = 0;
@@ -671,7 +704,7 @@ Page({
     }
 
     this.accountElapsedToNow();
-    this.updatePhaseFromClock();
+    this.updatePhaseFromClock({ allowCue: true });
     this.renderAll();
   },
 
@@ -700,6 +733,31 @@ Page({
     if (Date.now() - this.lastDailySaveAt >= AUTOSAVE_INTERVAL_MS) {
       this.saveDirtyDailySummaries();
     }
+  },
+
+  startFallbackClock(now = Date.now()) {
+    this.fallbackStartedAtMs = now;
+    this.fallbackStartedElapsed = this.elapsedSeconds;
+  },
+
+  stopFallbackClock() {
+    this.fallbackStartedAtMs = 0;
+    this.fallbackStartedElapsed = this.elapsedSeconds;
+  },
+
+  getPracticeElapsedSeconds() {
+    if (this.isRunning && this.fallbackStartedAtMs > 0) {
+      return this.fallbackStartedElapsed + Math.max(0, Date.now() - this.fallbackStartedAtMs) / 1000;
+    }
+
+    return this.elapsedSeconds;
+  },
+
+  preparePracticeAccounting(now = Date.now()) {
+    this.lastAccountedElapsed = this.elapsedSeconds;
+    this.lastAccountedAtWallMs = now;
+    this.startFallbackClock(now);
+    this.applyPhaseStateFromElapsed(this.elapsedSeconds);
   },
 
   addSecondsAcrossDates(startMs, seconds, session) {
@@ -856,12 +914,14 @@ Page({
   getPhaseStateFromElapsed(totalElapsedSeconds) {
     const phases = this.getCurrentMode().phases;
     const cycleDuration = phases.reduce((total, phase) => total + phase.duration, 0);
+    const cycleIndex = cycleDuration > 0 ? Math.floor(totalElapsedSeconds / cycleDuration) : 0;
     let cyclePosition = cycleDuration > 0 ? totalElapsedSeconds % cycleDuration : 0;
 
     for (let index = 0; index < phases.length; index += 1) {
       const phase = phases[index];
       if (cyclePosition < phase.duration) {
         return {
+          cycleIndex,
           phaseIndex: index,
           phaseElapsedMs: cyclePosition * 1000,
           secondsLeft: Math.max(1, Math.ceil(phase.duration - cyclePosition))
@@ -871,6 +931,7 @@ Page({
     }
 
     return {
+      cycleIndex,
       phaseIndex: 0,
       phaseElapsedMs: 0,
       secondsLeft: phases[0].duration
@@ -883,26 +944,46 @@ Page({
     return state;
   },
 
-  updatePhaseFromClock() {
-    const previousPhaseIndex = this.phaseIndex;
-    this.applyPhaseStateFromElapsed();
+  updatePhaseFromClock({ allowCue = false, referenceElapsed } = {}) {
+    const preciseElapsed = Number.isFinite(referenceElapsed) ? referenceElapsed : this.getPracticeElapsedSeconds();
+    const previousState = this.getPhaseStateFromElapsed(this.lastAccountedElapsed || this.elapsedSeconds);
+    const nextState = this.applyPhaseStateFromElapsed(preciseElapsed);
 
-    if (previousPhaseIndex !== this.phaseIndex) {
-      this.syncAudioToCurrentPhase(true);
+    if (allowCue) {
+      const nextCueKey = this.getCueKey(nextState);
+      if (this.lastCueKey !== nextCueKey) {
+        this.lastCueKey = nextCueKey;
+        this.playCueForPhase(nextState.phaseIndex);
+      }
     } else {
-      this.syncAudioToCurrentPhase(false);
+      this.lastCueKey = this.getCueKey(nextState);
     }
+
+    return {
+      previousPhaseIndex: previousState.phaseIndex,
+      phaseChanged: previousState.phaseIndex !== nextState.phaseIndex,
+      state: nextState
+    };
   },
 
-  switchMode(event) {
-    const modeKey = event.currentTarget.dataset.mode;
-    if (!MODES[modeKey] || modeKey === this.data.modeKey) {
-      return;
-    }
+  updateCustomTiming(event) {
+    const field = event.currentTarget.dataset.field;
+    const optionIndex = Number(event.detail.value) || 0;
+    const nextSeconds = PHASE_SECOND_OPTIONS[optionIndex] || DEFAULT_TIGHTEN_SECONDS;
+    const nextData =
+      field === "tighten"
+        ? {
+            tightenSeconds: nextSeconds,
+            tightenIndex: optionIndex
+          }
+        : {
+            relaxSeconds: nextSeconds,
+            relaxIndex: optionIndex
+          };
 
     this.accountElapsedToNow();
     this.finishActiveSession();
-    this.setData({ modeKey });
+    this.setData(nextData);
     this.saveConfig();
     this.resetSession(true);
     this.renderAll();
@@ -915,7 +996,8 @@ Page({
 
     if (soundEnabled && this.isRunning) {
       this.audioStatusMessage = "";
-      this.startAudio(true);
+      this.markCurrentCuePlayed(this.getPracticeElapsedSeconds());
+      this.scheduleNextCue();
     } else {
       this.pauseAudio();
     }
@@ -923,215 +1005,36 @@ Page({
     this.refreshAudioStatus();
   },
 
-  startAudio(shouldSync) {
-    if (!this.data.soundEnabled) {
-      return;
-    }
-
-    const mode = this.getCurrentMode();
-    const audio = this.ensureAudioContext();
-    const replacedSource = this.prepareAudioSource(audio, mode);
-    const needsSync = shouldSync || replacedSource;
-
-    if (needsSync) {
-      this.setAudioPositionFromElapsed();
-    }
-
-    this.audioStatusMessage = "";
-    this.refreshAudioStatus();
-    audio.play();
-
-    if (needsSync) {
-      setTimeout(() => {
-        this.syncAudioToCurrentPhase(true);
-      }, 120);
-    }
-  },
-
   pauseAudio() {
-    if (this.audioContext) {
-      this.updateAudioClockOffset();
-      this.audioContext.pause();
-    }
-    if (this.isRunning) {
-      this.startFallbackClock();
-    }
-    this.lastAudioSyncAtMs = 0;
+    this.clearCueTimer();
     this.refreshAudioStatus();
   },
 
   stopAudio(shouldReset) {
-    if (this.audioContext) {
-      this.updateAudioClockOffset();
-      this.audioContext.stop();
-      this.isAudioPlaying = false;
-      if (shouldReset) {
-        this.audioReady = false;
-        this.audioClockOffsetSeconds = 0;
-        this.lastAudioCurrentTime = 0;
-      }
+    this.clearCueTimer();
+    if (shouldReset) {
+      this.lastCueKey = "";
     }
-    this.lastAudioSyncAtMs = 0;
     this.refreshAudioStatus();
   },
 
-  getAudioLoopDuration() {
-    const duration = Number(this.audioContext && this.audioContext.duration) || 0;
-    if (duration > 0) {
-      return duration;
-    }
-
-    const mode = this.getCurrentMode();
-    return mode.phases.reduce((total, phase) => total + phase.duration, 0);
-  },
-
-  updateAudioClockOffset() {
-    if (!this.audioContext) {
-      return;
-    }
-
-    const currentTime = Number(this.audioContext.currentTime) || 0;
-    const duration = this.getAudioLoopDuration();
-    if (duration > 0 && this.lastAudioCurrentTime - currentTime > duration / 2) {
-      this.audioClockOffsetSeconds += duration;
-    }
-
-    this.lastAudioCurrentTime = currentTime;
-  },
-
-  isAudioClockActive() {
-    return Boolean(this.data.soundEnabled && this.audioContext && this.isAudioPlaying && this.audioReady);
-  },
-
-  getPracticeElapsedSeconds() {
-    if (this.isAudioClockActive()) {
-      this.updateAudioClockOffset();
-      return Math.max(this.elapsedSeconds, this.audioClockOffsetSeconds + (Number(this.audioContext.currentTime) || 0));
-    }
-
-    if (this.isRunning && this.fallbackStartedAtMs > 0) {
-      return this.fallbackStartedElapsed + Math.max(0, Date.now() - this.fallbackStartedAtMs) / 1000;
-    }
-
-    return this.elapsedSeconds;
-  },
-
-  setAudioPositionFromElapsed() {
-    if (!this.audioContext) {
-      this.audioClockOffsetSeconds = this.elapsedSeconds;
-      this.lastAudioCurrentTime = 0;
-      return;
-    }
-
-    const duration = this.getAudioLoopDuration();
-    const targetTime = duration > 0 ? this.elapsedSeconds % duration : 0;
-    if (typeof this.audioContext.seek === "function") {
-      this.audioContext.seek(targetTime);
-    } else {
-      this.audioClockOffsetSeconds = this.elapsedSeconds - targetTime;
-      this.lastAudioCurrentTime = targetTime;
-      return;
-    }
-    this.audioClockOffsetSeconds = this.elapsedSeconds - targetTime;
-    this.lastAudioCurrentTime = targetTime;
-  },
-
-  startFallbackClock() {
-    this.fallbackStartedAtMs = Date.now();
-    this.fallbackStartedElapsed = this.elapsedSeconds;
-  },
-
-  stopFallbackClock() {
-    this.fallbackStartedAtMs = 0;
-    this.fallbackStartedElapsed = this.elapsedSeconds;
-  },
-
-  preparePracticeAccounting(now = Date.now()) {
-    this.lastAccountedElapsed = this.elapsedSeconds;
-    this.lastAccountedAtWallMs = now;
-    this.startFallbackClock();
-    this.applyPhaseStateFromElapsed(this.elapsedSeconds);
-  },
-
-  getAudioTargetSeconds() {
-    const loopDuration = this.getAudioLoopDuration();
-    if (loopDuration <= 0) {
-      return 0;
-    }
-
-    return this.getPracticeElapsedSeconds() % loopDuration;
-  },
-
-  getAudioDriftSeconds(actualSeconds, targetSeconds) {
-    const loopDuration = this.getAudioLoopDuration();
-    if (loopDuration <= 0) {
-      return actualSeconds - targetSeconds;
-    }
-
-    let driftSeconds = actualSeconds - targetSeconds;
-    if (driftSeconds > loopDuration / 2) {
-      driftSeconds -= loopDuration;
-    } else if (driftSeconds < -loopDuration / 2) {
-      driftSeconds += loopDuration;
-    }
-    return driftSeconds;
-  },
-
-  isAudioCueWindow(seconds) {
-    const loopDuration = this.getAudioLoopDuration();
-    if (loopDuration <= 0) {
-      return false;
-    }
-
-    const normalizedSeconds = ((seconds % loopDuration) + loopDuration) % loopDuration;
-    let phaseStartsAt = 0;
-    return this.getCurrentMode().phases.some((phase) => {
-      const inWindow = normalizedSeconds >= phaseStartsAt && normalizedSeconds < phaseStartsAt + AUDIO_CUE_GUARD_SECONDS;
-      phaseStartsAt += phase.duration;
-      return inWindow;
-    });
-  },
-
-  syncAudioToCurrentPhase(force) {
-    if (!this.audioContext || !this.data.soundEnabled || !this.isRunning) {
-      return;
-    }
-
-    const now = Date.now();
-    if (!force && now - this.lastAudioSyncAtMs < AUDIO_SYNC_INTERVAL_MS) {
-      return;
-    }
-
-    const targetSeconds = this.getAudioTargetSeconds();
-    const currentTime = Number(this.audioContext.currentTime) || 0;
-    const driftSeconds = this.getAudioDriftSeconds(currentTime, targetSeconds);
-    const toleranceSeconds = force ? AUDIO_FORCE_SYNC_TOLERANCE_SECONDS : AUDIO_DRIFT_TOLERANCE_SECONDS;
-
-    this.lastAudioSyncAtMs = now;
-
-    if (Math.abs(driftSeconds) <= toleranceSeconds) {
-      return;
-    }
-
-    if (!force && (this.isAudioCueWindow(currentTime) || this.isAudioCueWindow(targetSeconds))) {
-      return;
-    }
-
-    if (typeof this.audioContext.seek === "function") {
-      this.audioContext.seek(targetSeconds);
-      this.audioClockOffsetSeconds = this.elapsedSeconds - targetSeconds;
-      this.lastAudioCurrentTime = targetSeconds;
-    }
-  },
-
   destroyAudio() {
-    if (this.audioContext) {
-      this.stopAudio(false);
-      if (typeof this.audioContext.destroy === "function") {
-        this.audioContext.destroy();
-      }
+    this.clearCueTimer();
+    if (this.cuePlayers) {
+      Object.values(this.cuePlayers).forEach((player) => {
+        if (!player) {
+          return;
+        }
+        if (typeof player.stop === "function") {
+          player.stop();
+        }
+        if (typeof player.destroy === "function") {
+          player.destroy();
+        }
+      });
     }
-    this.audioContext = null;
+    this.cuePlayers = null;
+    this.lastCueKey = "";
     this.audioHandlers = null;
     this.audioEventsBound = false;
     this.audioReady = false;
